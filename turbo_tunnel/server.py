@@ -55,7 +55,8 @@ class TunnelServer(object):
         self._running = False
 
     def create_tunnel_chain(self):
-        return chain.TunnelChain(self._tunnel_router or self._tunnel_urls, self.retry_count + 1)
+        return chain.TunnelChain(self._tunnel_router or self._tunnel_urls,
+                                 self.retry_count + 1)
 
     async def forward_data_to_upstream(self, tun_conn, downstream, upstream):
         while self._running:

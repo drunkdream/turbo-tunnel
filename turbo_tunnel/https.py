@@ -114,12 +114,19 @@ class HTTPSTunnelServer(server.TunnelServer):
                         try:
                             await tunnel_chain.create_tunnel(address)
                         except utils.TunnelError as e:
-                            utils.logger.warn('[%s] Connect %s:%d failed: %s' %
-                                              (self.__class__.__name__,
-                                               address[0], address[1], e))
+                            if not isinstance(e, utils.TunnelBlockedError):
+                                utils.logger.warn(
+                                    '[%s] Connect %s:%d failed: %s' %
+                                    (self.__class__.__name__, address[0],
+                                     address[1], e))
                             if not downstream.closed():
-                                await downstream.write(
-                                    b'HTTP/1.1 504 Gateway timeout\r\n\r\n')
+                                if isinstance(e, utils.TunnelBlockedError):
+                                    await downstream.write(
+                                        b'HTTP/1.1 403 Forbidden\r\n\r\n')
+                                else:
+                                    await downstream.write(
+                                        b'HTTP/1.1 504 Gateway timeout\r\n\r\n'
+                                    )
                             else:
                                 tun_conn.on_downstream_closed()
                             self._finished = True
@@ -149,6 +156,9 @@ class HTTPSTunnelServer(server.TunnelServer):
 
     def start(self):
         self._http_server.listen(self._listen_url.port, self._listen_url.host)
+        utils.logger.info('[%s] HTTP server is listening on %s:%d' %
+                          (self.__class__.__name__, self._listen_url.host,
+                           self._listen_url.port))
 
 
 registry.tunnel_registry.register('http', HTTPSTunnel)

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-'''
+'''Miscellaneous utility functions and classes
 '''
 
 import logging
@@ -13,7 +13,6 @@ logger = logging.getLogger('turbo-tunnel')
 
 
 class Url(object):
-
     def __init__(self, url):
         self._url = url
         obj = urllib.parse.urlparse(url)
@@ -43,11 +42,11 @@ class Url(object):
     @property
     def protocol(self):
         return self._protocol
-    
+
     @property
     def host(self):
         return self._host
-    
+
     @property
     def port(self):
         if self._port:
@@ -73,7 +72,6 @@ class Url(object):
 class TCPStream(object):
     '''IOStream Wrapper
     '''
-
     def __init__(self, socket_or_stream):
         if isinstance(socket_or_stream, socket.socket):
             self._stream = tornado.iostream.IOStream(socket_or_stream)
@@ -115,6 +113,14 @@ class TimeoutError(RuntimeError):
 
 
 class TunnelError(RuntimeError):
+    pass
+
+
+class TunnelConnectError(TunnelError):
+    pass
+
+
+class TunnelBlockedError(TunnelError):
     pass
 
 

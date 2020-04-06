@@ -39,9 +39,6 @@ class Tunnel(object):
             dependency = dependency.dependency
         return url_list
 
-    def is_default(self):
-        return self._is_default
-
     @property
     def dependency(self):
         return self._dependency
@@ -49,6 +46,12 @@ class Tunnel(object):
     @dependency.setter
     def dependency(self, value):
         self._dependency = value
+
+    def is_default(self):
+        return self._is_default
+
+    def is_blocked(self):
+        return self._url.protocol == 'block'
 
 
 class TunnelRule(object):

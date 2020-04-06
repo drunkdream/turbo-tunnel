@@ -25,6 +25,10 @@ class TunnelRouter(object):
                 max_priority = rule.priority
                 tunnel = rule.tunnel
         if tunnel:
-            return self._conf.get_tunnel(tunnel)
+            tunnel = self._conf.get_tunnel(tunnel)
+            if tunnel.is_blocked():
+                return None
+            else:
+                return tunnel
         else:
             return self._conf.default_tunnel
