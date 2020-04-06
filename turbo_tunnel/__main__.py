@@ -4,6 +4,7 @@
 
 import argparse
 import logging
+import logging.handlers
 import os
 import sys
 
@@ -21,7 +22,8 @@ def main():
     parser.add_argument('--config', help='config yaml file path')
     parser.add_argument('--listen', help='listen url')
     parser.add_argument('--tunnel', action='append', help='tunnel url')
-    parser.add_argument('--level', help='log level', choices=('debug', 'info', 'warn', 'error'), default='info')
+    parser.add_argument('--log-level', help='log level, default is info', choices=('debug', 'info', 'warn', 'error'), default='info')
+    parser.add_argument('--log-file', help='log file save path')
     parser.add_argument('--retry', type=int, help='retry connect count', default=0)
 
     args = sys.argv[1:]
@@ -49,24 +51,32 @@ def main():
         print('Argument --listen not specified', file=sys.stderr)
         return -1
 
-    if args.level == 'debug':
+    if args.log_level == 'debug':
         utils.logger.setLevel(logging.DEBUG)
-    elif args.level == 'info':
+    elif args.log_level == 'info':
         utils.logger.setLevel(logging.INFO)
-    elif args.level == 'warn':
+    elif args.log_level == 'warn':
         utils.logger.setLevel(logging.WARN)
-    elif args.level == 'error':
+    elif args.log_level == 'error':
         utils.logger.setLevel(logging.ERROR)
     handler = logging.StreamHandler()
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    formatter = logging.Formatter("[%(asctime)s][%(levelname)s]%(message)s")
     handler.setFormatter(formatter)
     utils.logger.addHandler(handler)
+    if args.log_file:
+        handler = logging.handlers.RotatingFileHandler(args.log_file, maxBytes=10*1024*1024, backupCount=4)
+        formatter = logging.Formatter("[%(asctime)s][%(levelname)s][%(filename)s][%(lineno)d]%(message)s")
+        handler.setFormatter(formatter)
+        utils.logger.addHandler(handler)
 
     if args.retry:
         server.TunnelServer.retry_count = args.retry
 
     tunnel_server.start()
-    tornado.ioloop.IOLoop.current().start()
+    try:
+        tornado.ioloop.IOLoop.current().start()
+    except KeyboardInterrupt:
+        print('Process exit warmly.')
 
 
 if __name__ == '__main__':
