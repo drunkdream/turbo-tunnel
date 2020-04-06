@@ -10,6 +10,7 @@ import sys
 import tornado.ioloop
 
 from . import conf
+from . import route
 from . import server
 from . import utils
 
