@@ -16,7 +16,6 @@ from . import utils
 def _retry_func(func):
     async def func_wrapper(self, *args, **kwargs):
         for i in range(self._try_connect_count):
-            print('_retry_func')
             try:
                 return await func(self, *args, **kwargs)
             except Exception as e:
