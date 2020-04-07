@@ -12,6 +12,7 @@ from . import registry
 from . import tunnel
 from . import utils
 
+
 class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
     '''WebSocket Client Support using exist connection 
     '''
@@ -23,31 +24,33 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         self._closed = False
         self.__timeout = timeout
         compression_options = None
-        request = tornado.httpclient.HTTPRequest(self._url, headers=headers, connect_timeout=timeout, request_timeout=timeout)
-        request = tornado.httpclient._RequestProxy(request, tornado.httpclient.HTTPRequest._DEFAULTS)
+        request = tornado.httpclient.HTTPRequest(
+            self._url, headers=headers, connect_timeout=timeout, request_timeout=timeout)
+        request = tornado.httpclient._RequestProxy(
+            request, tornado.httpclient.HTTPRequest._DEFAULTS)
         super(WebSocketTunnelConnection, self).__init__(request,
-            on_message_callback=self.on_message,
-            compression_options=compression_options
-        )
+                                                        on_message_callback=self.on_message,
+                                                        compression_options=compression_options
+                                                        )
         self._patcher = self._patch_tcp_client(self._stream)
         self._patcher.patch()
         self._buffer = b''
 
     def _patch_tcp_client(self, stream):
         TCPClient = tornado.tcpclient.TCPClient
-        
+
         async def connect(
-            tcp_client,
-            host,
-            port,
-            af=socket.AF_UNSPEC,
-            ssl_options=None,
-            max_buffer_size=None,
-            source_ip=None,
-            source_port=None,
-            timeout=None):
+                tcp_client,
+                host,
+                port,
+                af=socket.AF_UNSPEC,
+                ssl_options=None,
+                max_buffer_size=None,
+                source_ip=None,
+                source_port=None,
+                timeout=None):
             return stream
-    
+
         class TCPClientPatchContext(object):
 
             def __init__(self, patched_connect):
@@ -56,7 +59,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
 
             def patch(self):
                 TCPClient.connect = self._patched_connect
-            
+
             def unpatch(self):
                 TCPClient.connect = self._origin_connect
 
@@ -65,13 +68,14 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
 
             def __exit__(self, exc_type, exc_value, exc_trackback):
                 self.unpatch()
-        
+
         return TCPClientPatchContext(connect)
 
     async def headers_received(self, start_line, headers):
         await super(WebSocketTunnelConnection, self).headers_received(start_line, headers)
         if start_line.code != 101:
-            utils.logger.error('[%s] Connect %s return %d' % (self.__class__.__name__, self._url, start_line.code))
+            utils.logger.error('[%s] Connect %s return %d' % (
+                self.__class__.__name__, self._url, start_line.code))
             self._connected = False
         else:
             self._connected = True
@@ -91,7 +95,8 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             self._patcher.unpatch()
             return self._connected
         else:
-            utils.logger.warn('[%s] Connect %s timeout' % (self.__class__.__name__, self._url))
+            utils.logger.warn('[%s] Connect %s timeout' %
+                              (self.__class__.__name__, self._url))
             self._patcher.unpatch()
             return False
 
@@ -118,13 +123,13 @@ class WebSocketTunnel(tunnel.Tunnel):
     '''
 
     def __init__(self, tunnel, url, address):
-        url.path = url.path.replace('{addr}', address[0])
-        url.path = url.path.replace('{port}', str(address[1]))
+        url.path = url.path.format(addr=address[0], port=address[1])
         super(WebSocketTunnel, self).__init__(tunnel, url, address)
         self._upstream = None
 
     async def connect(self):
-        self._upstream = WebSocketTunnelConnection(self._tunnel.stream, str(self._url))
+        self._upstream = WebSocketTunnelConnection(
+            self._tunnel.stream, str(self._url))
         return await self._upstream.wait_for_connecting()
 
     async def read(self):
@@ -138,5 +143,5 @@ class WebSocketTunnel(tunnel.Tunnel):
             self._upstream.close()
             self._upstream = None
 
+
 registry.tunnel_registry.register('ws', WebSocketTunnel)
-    
