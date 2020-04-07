@@ -74,23 +74,29 @@ class IStream(object):
 
     @property
     def socket(self):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     @property
     def stream(self):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     async def connect(self):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     async def read(self):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     async def write(self, buffer):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     def close(self):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
 
 class TCPStream(IStream):
