@@ -76,7 +76,7 @@ class TunnelChain(object):
         try:
             await tunnel_stream.connect(tunnel_address)
         except tornado.iostream.StreamClosedError:
-            raise utils.TunnelConnectError('Connect %s failed' % tun)
+            raise utils.TunnelConnectError('Connect %s failed' % tun.target_address)
 
         for i, url in enumerate(self._tunnel_urls):
             tunnel_class = registry.tunnel_registry[url.protocol]

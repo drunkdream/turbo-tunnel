@@ -82,6 +82,11 @@ class IStream(object):
         raise NotImplementedError('%s.%s' % (
             self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
+    @property
+    def target_address(self):
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
     async def connect(self):
         raise NotImplementedError('%s.%s' % (
             self.__class__.__name__, inspect.currentframe().f_code.co_name))
@@ -119,6 +124,13 @@ class TCPStream(IStream):
     @property
     def stream(self):
         return self._stream
+
+    @property
+    def target_address(self):
+        return self.socket.getpeername()
+
+    async def connect(self, address):
+        return await self._stream.connect(address)
 
     def close(self):
         if self._stream:
