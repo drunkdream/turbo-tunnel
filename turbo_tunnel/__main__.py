@@ -22,9 +22,13 @@ def main():
     parser.add_argument('--config', help='config yaml file path')
     parser.add_argument('--listen', help='listen url')
     parser.add_argument('--tunnel', action='append', help='tunnel url')
-    parser.add_argument('--log-level', help='log level, default is info', choices=('debug', 'info', 'warn', 'error'), default='info')
+    parser.add_argument('--log-level', help='log level, default is info',
+                        choices=('debug', 'info', 'warn', 'error'), default='info')
     parser.add_argument('--log-file', help='log file save path')
-    parser.add_argument('--retry', type=int, help='retry connect count', default=0)
+    parser.add_argument('--retry', type=int,
+                        help='retry connect count', default=0)
+    parser.add_argument('--daemon', help='run as daemon',
+                        action='store_true', default=False)
 
     args = sys.argv[1:]
     if not args:
@@ -51,6 +55,14 @@ def main():
         print('Argument --listen not specified', file=sys.stderr)
         return -1
 
+    log_file = None
+    if args.log_file:
+        log_file = os.path.abspath(args.log_file)
+
+    if sys.platform != 'win32' and args.daemon:
+        import daemon
+        daemon.DaemonContext(stderr=open('error.txt', 'w')).open()
+
     if args.log_level == 'debug':
         utils.logger.setLevel(logging.DEBUG)
     elif args.log_level == 'info':
@@ -63,9 +75,11 @@ def main():
     formatter = logging.Formatter("[%(asctime)s][%(levelname)s]%(message)s")
     handler.setFormatter(formatter)
     utils.logger.addHandler(handler)
-    if args.log_file:
-        handler = logging.handlers.RotatingFileHandler(args.log_file, maxBytes=10*1024*1024, backupCount=4)
-        formatter = logging.Formatter("[%(asctime)s][%(levelname)s][%(filename)s][%(lineno)d]%(message)s")
+    if log_file:
+        handler = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=10*1024*1024, backupCount=4)
+        formatter = logging.Formatter(
+            "[%(asctime)s][%(levelname)s][%(filename)s][%(lineno)d]%(message)s")
         handler.setFormatter(formatter)
         utils.logger.addHandler(handler)
 
