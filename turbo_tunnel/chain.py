@@ -13,20 +13,6 @@ from . import tunnel
 from . import utils
 
 
-def _retry_func(func):
-    async def func_wrapper(self, *args, **kwargs):
-        for i in range(self._try_connect_count):
-            try:
-                return await func(self, *args, **kwargs)
-            except utils.TunnelConnectError as e:
-                if i < self._try_connect_count - 1:
-                    utils.logger.exception('[%s] Call function %s %d failed' % (self.__class__.__name__, func.__name__, (i + 1)))
-                    await tornado.gen.sleep(1)
-                else:
-                    raise e
-    return func_wrapper
-
-
 class TunnelChain(object):
     '''Tunnel Chain
     '''
@@ -38,6 +24,8 @@ class TunnelChain(object):
         else:
             self._tunnel_urls = tunnel_router_or_urls
         self._try_connect_count = try_connect_count
+        if self._try_connect_count > 1:
+            self.create_tunnel = self._retry(self.create_tunnel)
         self._tunnel_list = []
         self._index = 0
 
@@ -55,7 +43,19 @@ class TunnelChain(object):
         else:
             return None
 
-    @_retry_func
+    def _retry(self, func):
+        async def func_wrapper(*args, **kwargs):
+            for i in range(self._try_connect_count):
+                try:
+                    return await func(*args, **kwargs)
+                except utils.TunnelConnectError as e:
+                    if i < self._try_connect_count - 1:
+                        utils.logger.exception('[%s] Call function %s %d failed' % (self.__class__.__name__, func.__name__, (i + 1)))
+                        await tornado.gen.sleep(1)
+                    else:
+                        raise e
+        return func_wrapper
+
     async def create_tunnel(self, address):
         if self._tunnel_router:
             selected_tunnel = self._tunnel_router.select(address)
@@ -76,7 +76,7 @@ class TunnelChain(object):
         try:
             await tunnel_stream.connect(tunnel_address)
         except tornado.iostream.StreamClosedError:
-            raise utils.TunnelConnectError('Connect %s failed' % tun)
+            raise utils.TunnelConnectError('Connect %s failed' % tun.target_address)
 
         for i, url in enumerate(self._tunnel_urls):
             tunnel_class = registry.tunnel_registry[url.protocol]

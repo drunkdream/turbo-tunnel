@@ -3,6 +3,7 @@
 '''WebSocket Tunnel
 '''
 
+import copy
 import socket
 import time
 
@@ -123,6 +124,7 @@ class WebSocketTunnel(tunnel.Tunnel):
     '''
 
     def __init__(self, tunnel, url, address):
+        url = copy.copy(url)
         url.path = url.path.format(addr=address[0], port=address[1])
         super(WebSocketTunnel, self).__init__(tunnel, url, address)
         self._upstream = None

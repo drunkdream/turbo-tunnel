@@ -14,8 +14,8 @@ from . import registry
 from . import utils
 
 
-class Tunnel(object):
-    '''
+class Tunnel(utils.IStream):
+    '''Tunnel base class
     '''
     timeout = 15
 
@@ -27,30 +27,12 @@ class Tunnel(object):
             self._addr, self._port = url.host, url.port
         self._running = True
         self._connected = False
-        #asyncio.ensure_future(self.start())
 
     def __str__(self):
         return '%s %s' % (self.__class__.__name__, self._url)
 
-    @property
-    def socket(self):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
-
-    @property
-    def stream(self):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
-
-    async def read(self):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
-
     def on_read(self, buffer):
         utils.logger.debug('[%s] Recv %d bytes from upstream' % (self.__class__.__name__, len(buffer)))
-
-    async def write(self, buffer):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
-
-    def close(self):
-        raise NotImplementedError('%s.%s' % (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     def on_close(self):
         address = ''
@@ -68,11 +50,6 @@ class Tunnel(object):
                 break
         else:
             raise utils.TimeoutError('Wait for connecting timeout')
-
-    async def connect(self):
-        '''
-        '''
-        raise NotImplementedError
 
 
 class TCPTunnel(Tunnel):

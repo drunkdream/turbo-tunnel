@@ -3,6 +3,7 @@
 '''Miscellaneous utility functions and classes
 '''
 
+import inspect
 import logging
 import socket
 import urllib.parse
@@ -69,9 +70,44 @@ class Url(object):
         self._path = value
 
 
-class TCPStream(object):
+class IStream(object):
+
+    @property
+    def socket(self):
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
+    @property
+    def stream(self):
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
+    @property
+    def target_address(self):
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
+    async def connect(self):
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
+    async def read(self):
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
+    async def write(self, buffer):
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
+    def close(self):
+        raise NotImplementedError('%s.%s' % (
+            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
+
+class TCPStream(IStream):
     '''IOStream Wrapper
     '''
+
     def __init__(self, socket_or_stream):
         if isinstance(socket_or_stream, socket.socket):
             self._stream = tornado.iostream.IOStream(socket_or_stream)
@@ -88,6 +124,13 @@ class TCPStream(object):
     @property
     def stream(self):
         return self._stream
+
+    @property
+    def target_address(self):
+        return self.socket.getpeername()
+
+    async def connect(self, address):
+        return await self._stream.connect(address)
 
     def close(self):
         if self._stream:
