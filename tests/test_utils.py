@@ -12,6 +12,8 @@ import tornado
 
 from turbo_tunnel import utils
 
+from .util import DemoTCPServer
+
 
 def test_url():
     url = utils.Url('http://www.qq.com:8080/test')
@@ -34,11 +36,6 @@ def test_url():
 
 @pytest.mark.asyncio
 async def test_tcp_stream():
-    class DemoTCPServer(tornado.tcpserver.TCPServer):
-        async def handle_stream(self, stream, address):
-            buffer = await stream.read_until(b'\n')
-            await stream.write(buffer)
-            stream.close()
     server = DemoTCPServer()
     port = random.randint(1000, 65000)
     server.listen(port)
