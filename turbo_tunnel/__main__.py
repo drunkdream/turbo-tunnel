@@ -11,6 +11,7 @@ import sys
 import tornado.ioloop
 
 from . import conf
+from . import registry
 from . import route
 from . import server
 from . import utils
@@ -113,6 +114,7 @@ def main():
     try:
         tornado.ioloop.IOLoop.current().start()
     except KeyboardInterrupt:
+        registry.plugin_registry.notify('unload')
         print('Process exit warmly.')
 
 
