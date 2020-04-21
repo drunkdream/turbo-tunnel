@@ -110,12 +110,21 @@ class TunnelConnection(object):
     def __exit__(self, exc_type, exc_value, exc_trackback):
         self.on_close()
 
+    @property
+    def client_address(self):
+        return self._client_address
+
+    @property
+    def target_address(self):
+        return self._target_address
+
     def on_open(self):
         message = '[%s] New connection from %s:%d' % (self.__class__.__name__,
                                                       self._client_address[0],
                                                       self._client_address[1])
         message += ', tunnel to %s:%d' % self._target_address
         utils.logger.info(message)
+        registry.plugin_registry.notify('new_connection', self)
 
     def on_data_recevied(self, buffer):
         self._bytes_received += len(buffer)
@@ -123,6 +132,7 @@ class TunnelConnection(object):
                            (self.__class__.__name__, self._client_address[0],
                             self._client_address[1], self._target_address[0],
                             self._target_address[1], len(buffer)))
+        registry.plugin_registry.notify('data_recevied', self, buffer)
 
     def on_data_sent(self, buffer):
         self._bytes_sent += len(buffer)
@@ -130,6 +140,7 @@ class TunnelConnection(object):
                            (self.__class__.__name__, self._client_address[0],
                             self._client_address[1], self._target_address[0],
                             self._target_address[1], len(buffer)))
+        registry.plugin_registry.notify('data_sent', self, buffer)
 
     def on_upstream_closed(self):
         utils.logger.info('[%s][%s:%d][%s:%d] Upstream closed' %
@@ -150,6 +161,7 @@ class TunnelConnection(object):
             (self.__class__.__name__, self._client_address[0],
              self._client_address[1], self._target_address[0],
              self._target_address[1], self._bytes_sent, self._bytes_received))
+        registry.plugin_registry.notify('connection_closed', self)
 
 
 class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
