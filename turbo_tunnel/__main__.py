@@ -22,13 +22,22 @@ def main():
     parser.add_argument('--config', help='config yaml file path')
     parser.add_argument('--listen', help='listen url')
     parser.add_argument('--tunnel', action='append', help='tunnel url')
-    parser.add_argument('--log-level', help='log level, default is info',
-                        choices=('debug', 'info', 'warn', 'error'), default='info')
+    parser.add_argument('--log-level',
+                        help='log level, default is info',
+                        choices=('debug', 'info', 'warn', 'error'),
+                        default='info')
     parser.add_argument('--log-file', help='log file save path')
-    parser.add_argument('--retry', type=int,
-                        help='retry connect count', default=0)
-    parser.add_argument('--daemon', help='run as daemon',
-                        action='store_true', default=False)
+    parser.add_argument('--retry',
+                        type=int,
+                        help='retry connect count',
+                        default=0)
+    parser.add_argument('--daemon',
+                        help='run as daemon',
+                        action='store_true',
+                        default=False)
+    parser.add_argument('--plugin',
+                        help='load plugin',
+                        action='append')
 
     args = sys.argv[1:]
     if not args:
@@ -46,11 +55,10 @@ def main():
         router = route.TunnelRouter(config)
         tunnel_server = server.TunnelServer(config.listen_url, router)
     elif args.listen:
-        if len(args.tunnel) == 0:
-            print('Argument --tunnel not specified', file=sys.stderr)
-            return -1
-
-        tunnel_server = server.TunnelServer(args.listen, args.tunnel)
+        tunnel = args.tunnel
+        if not tunnel:
+            tunnel = ['tcp://']
+        tunnel_server = server.TunnelServer(args.listen, tunnel)
     else:
         print('Argument --listen not specified', file=sys.stderr)
         return -1
@@ -76,15 +84,30 @@ def main():
     handler.setFormatter(formatter)
     utils.logger.addHandler(handler)
     if log_file:
-        handler = logging.handlers.RotatingFileHandler(
-            log_file, maxBytes=10*1024*1024, backupCount=4)
+        handler = logging.handlers.RotatingFileHandler(log_file,
+                                                       maxBytes=10 * 1024 *
+                                                       1024,
+                                                       backupCount=4)
         formatter = logging.Formatter(
-            "[%(asctime)s][%(levelname)s][%(filename)s][%(lineno)d]%(message)s")
+            "[%(asctime)s][%(levelname)s][%(filename)s][%(lineno)d]%(message)s"
+        )
         handler.setFormatter(formatter)
         utils.logger.addHandler(handler)
 
     if args.retry:
         server.TunnelServer.retry_count = args.retry
+
+    if args.plugin:
+        for plugin in args.plugin:
+            for module in ('turbo_tunnel.plugins.%s' % plugin, plugin):
+                try:
+                    __import__(module)
+                except ImportError:
+                    pass
+                else:
+                    break
+            else:
+                utils.logger.error('Load plugin %s failed' % plugin)
 
     tunnel_server.start()
     try:
