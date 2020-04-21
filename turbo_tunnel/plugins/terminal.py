@@ -33,8 +33,10 @@ class TerminalTable(object):
             offset += header.width
             header.end = offset
         self._stdout = stdout or sys.stdout
+        self._stdout.write('\x1b[?1047h')
 
     def __del__(self):
+        self._stdout.write('\x1b[?1047l')
         self._stdout.write('\x1b[100B')
 
     def render_text(self, text, line, column, color=None):
@@ -201,6 +203,8 @@ class TerminalPlugin(Plugin):
 
     def on_unload(self):
         self._running = False
+        del self._term_tab
+        self._term_tab = None
 
     def _lookup_connection(self, src_addr, dst_addr):
         for conn in self._conn_list:
