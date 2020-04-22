@@ -200,7 +200,7 @@ class WebSocketTunnelServer(server.TunnelServer):
                 self._downstream = None
 
             async def connect(self):
-                '''连接目标服务端
+                '''connect target server
                 '''
                 address = None
                 ret = re.match(this._listen_url.path, self.request.path)
