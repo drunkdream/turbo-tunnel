@@ -64,12 +64,14 @@ class TunnelServer(object):
                 buffer = await downstream.read()
             except utils.TunnelClosedError:
                 tun_conn.on_downstream_closed()
+                upstream.close()
                 break
 
             try:
                 await upstream.write(buffer)
             except utils.TunnelClosedError:
                 tun_conn.on_upstream_closed()
+                downstream.close()
                 break
             else:
                 tun_conn.on_data_sent(buffer)
@@ -80,6 +82,7 @@ class TunnelServer(object):
                 buffer = await upstream.read()
             except utils.TunnelClosedError:
                 tun_conn.on_upstream_closed()
+                downstream.close()
                 break
             else:
                 tun_conn.on_data_recevied(buffer)
@@ -88,6 +91,7 @@ class TunnelServer(object):
                 await downstream.write(buffer)
             except utils.TunnelClosedError:
                 tun_conn.on_downstream_closed()
+                upstream.close()
                 break
 
     def start(self):
@@ -97,6 +101,7 @@ class TunnelServer(object):
 class TunnelConnection(object):
     '''Tunnel Connection
     '''
+
     def __init__(self, client_address, target_address):
         self._client_address = client_address
         self._target_address = target_address
@@ -167,6 +172,7 @@ class TunnelConnection(object):
 class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
     '''TCP Tunnel Server
     '''
+
     def post_init(self):
         tornado.tcpserver.TCPServer.__init__(self)
 

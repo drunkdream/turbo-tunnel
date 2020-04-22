@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 '''Tunnel chain
 '''
 
@@ -50,38 +49,51 @@ class TunnelChain(object):
                     return await func(*args, **kwargs)
                 except utils.TunnelConnectError as e:
                     if i < self._try_connect_count - 1:
-                        utils.logger.exception('[%s] Call function %s %d failed' % (self.__class__.__name__, func.__name__, (i + 1)))
+                        utils.logger.exception(
+                            '[%s] Call function %s %d failed' %
+                            (self.__class__.__name__, func.__name__, (i + 1)))
                         await tornado.gen.sleep(1)
                     else:
                         raise e
+
         return func_wrapper
 
     async def create_tunnel(self, address):
         if self._tunnel_router:
             selected_tunnel = self._tunnel_router.select(address)
             if not selected_tunnel:
-                utils.logger.warn('[%s] No tunnel for %s:%d, maybe blocked' % (self.__class__.__name__, address[0], address[1]))
-                raise utils.TunnelBlockedError('Address %s:%d is blocked' % (address))
+                utils.logger.warn(
+                    '[%s] No tunnel for %s:%d, maybe blocked' %
+                    (self.__class__.__name__, address[0], address[1]))
+                raise utils.TunnelBlockedError('Address %s:%d is blocked' %
+                                               (address))
 
             self._tunnel_urls = selected_tunnel.urls
-            utils.logger.info('[%s] Select tunnel %s to access %s:%d' % (self.__class__.__name__, ', '.join([str(url) for url in self._tunnel_urls]), address[0], address[1]))
+            utils.logger.info(
+                '[%s] Select tunnel %s to access %s:%d' %
+                (self.__class__.__name__, ', '.join(
+                    [str(url)
+                     for url in self._tunnel_urls]), address[0], address[1]))
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
         tunnel_stream = tornado.iostream.IOStream(s)
         tun = utils.TCPStream(tunnel_stream)
         self._tunnel_list.append(tun)
         tunnel_address = address
-        if self._tunnel_urls and self._tunnel_urls[0].host and self._tunnel_urls[0].port:
-            tunnel_address = (self._tunnel_urls[0].host, self._tunnel_urls[0].port)
+        if self._tunnel_urls and self._tunnel_urls[
+                0].host and self._tunnel_urls[0].port:
+            tunnel_address = (self._tunnel_urls[0].host,
+                              self._tunnel_urls[0].port)
 
         try:
             await tunnel_stream.connect(tunnel_address)
         except tornado.iostream.StreamClosedError:
-            raise utils.TunnelConnectError('Connect %s failed' % tun.target_address)
+            raise utils.TunnelConnectError('Connect %s:%d failed' % address)
 
         for i, url in enumerate(self._tunnel_urls):
             tunnel_class = registry.tunnel_registry[url.protocol]
             if not tunnel_class:
-                raise utils.TunnelError('%s tunnel not registered' % url.protocol.upper())
+                raise utils.TunnelError('%s tunnel not registered' %
+                                        url.protocol.upper())
             next_address = address
             if i < len(self._tunnel_urls) - 1:
                 next_url = self._tunnel_urls[i + 1]
@@ -91,13 +103,18 @@ class TunnelChain(object):
 
             if not await tun.connect():
                 raise utils.TunnelConnectError('Connect %s failed' % tun)
-            utils.logger.debug('[%s] Tunnel to %s established' % (self.__class__.__name__, url))
-        utils.logger.info('[%s] Create tunnel to %s:%d success' % (self.__class__.__name__, address[0], address[1]))
+            utils.logger.debug('[%s] Tunnel to %s established' %
+                               (self.__class__.__name__, url))
+        utils.logger.info('[%s] Create tunnel to %s:%d success' %
+                          (self.__class__.__name__, address[0], address[1]))
 
-    def __enter__(self):
-        return self
-    
-    def __exit__(self, exc_type, exc_value, exc_trackback):
+    def close(self):
         for tunnel in self._tunnel_list:
             tunnel.close()
         self._tunnel_list = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_trackback):
+        self.close()
