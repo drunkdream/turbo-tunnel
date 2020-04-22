@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 '''Miscellaneous utility functions and classes
 '''
 
@@ -71,37 +70,43 @@ class Url(object):
 
 
 class IStream(object):
-
     @property
     def socket(self):
-        raise NotImplementedError('%s.%s' % (
-            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError(
+            '%s.%s' %
+            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     @property
     def stream(self):
-        raise NotImplementedError('%s.%s' % (
-            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError(
+            '%s.%s' %
+            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     @property
     def target_address(self):
-        raise NotImplementedError('%s.%s' % (
-            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError(
+            '%s.%s' %
+            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     async def connect(self):
-        raise NotImplementedError('%s.%s' % (
-            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError(
+            '%s.%s' %
+            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     async def read(self):
-        raise NotImplementedError('%s.%s' % (
-            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError(
+            '%s.%s' %
+            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     async def write(self, buffer):
-        raise NotImplementedError('%s.%s' % (
-            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError(
+            '%s.%s' %
+            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     def close(self):
-        raise NotImplementedError('%s.%s' % (
-            self.__class__.__name__, inspect.currentframe().f_code.co_name))
+        raise NotImplementedError(
+            '%s.%s' %
+            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
 
 class TCPStream(IStream):
@@ -115,7 +120,11 @@ class TCPStream(IStream):
             self._stream = socket_or_stream
 
     def __getattr__(self, attr):
-        return getattr(self._stream, attr)
+        try:
+            return getattr(self._stream, attr)
+        except AttributeError:
+            raise AttributeError("'%s' object has no attribute '%s'" %
+                                 (self.__class__.__name__, attr))
 
     @property
     def socket(self):
@@ -127,7 +136,10 @@ class TCPStream(IStream):
 
     @property
     def target_address(self):
-        return self.socket.getpeername()
+        if self.socket:
+            return self.socket.getpeername()
+        else:
+            return None
 
     async def connect(self, address):
         return await self._stream.connect(address)
@@ -148,6 +160,8 @@ class TCPStream(IStream):
         raise TunnelClosedError()
 
     async def write(self, buffer):
+        if not self._stream:
+            raise TunnelClosedError
         await self._stream.write(buffer)
 
 
