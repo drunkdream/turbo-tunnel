@@ -15,11 +15,9 @@ from . import tunnel
 from . import utils
 
 
-class HTTPSTunnel(tunnel.Tunnel):
+class HTTPSTunnel(tunnel.TCPTunnel):
     '''HTTPS Tunnel
     '''
-    def __init__(self, tunnel, url, address):
-        super(HTTPSTunnel, self).__init__(tunnel, url, address)
 
     @property
     def socket(self):
@@ -49,12 +47,6 @@ class HTTPSTunnel(tunnel.Tunnel):
                           (self.__class__.__name__, self._addr, self._port,
                            self._url, code, reason))
         return False
-
-    async def read(self):
-        return await self._tunnel.read()
-
-    async def write(self, buffer):
-        await self._tunnel.write(buffer)
 
     def close(self):
         if self._tunnel:

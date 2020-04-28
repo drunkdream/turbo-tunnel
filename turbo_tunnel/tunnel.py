@@ -56,9 +56,6 @@ class TCPTunnel(Tunnel):
     '''TCP Tunnel
     '''
 
-    def __init__(self, tunnel, url, address):
-        super(TCPTunnel, self).__init__(tunnel, url, address)
-
     async def connect(self):
         return True
 
