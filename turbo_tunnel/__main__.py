@@ -20,9 +20,9 @@ from . import utils
 def main():
     parser = argparse.ArgumentParser(prog='turbo-tunnel',
                                      description='TurboTunnel cmdline tool.')
-    parser.add_argument('--config', help='config yaml file path')
-    parser.add_argument('--listen', help='listen url')
-    parser.add_argument('--tunnel', action='append', help='tunnel url')
+    parser.add_argument('-c', '--config', help='config yaml file path')
+    parser.add_argument('-l', '--listen', help='listen url')
+    parser.add_argument('-t', '--tunnel', action='append', help='tunnel url')
     parser.add_argument('--log-level',
                         help='log level, default is info',
                         choices=('debug', 'info', 'warn', 'error'),
@@ -32,11 +32,11 @@ def main():
                         type=int,
                         help='retry connect count',
                         default=0)
-    parser.add_argument('--daemon',
+    parser.add_argument('-d', '--daemon',
                         help='run as daemon',
                         action='store_true',
                         default=False)
-    parser.add_argument('--plugin',
+    parser.add_argument('-p', '--plugin',
                         help='load plugin',
                         action='append')
 
@@ -46,6 +46,18 @@ def main():
         return 0
 
     args = parser.parse_args(args)
+
+    if args.plugin:
+        for plugin in args.plugin:
+            for module in ('turbo_tunnel.plugins.%s' % plugin, plugin):
+                try:
+                    __import__(module)
+                except ImportError:
+                    pass
+                else:
+                    break
+            else:
+                utils.logger.error('Load plugin %s failed' % plugin)
 
     tunnel_server = None
     if args.config:
@@ -97,18 +109,6 @@ def main():
 
     if args.retry:
         server.TunnelServer.retry_count = args.retry
-
-    if args.plugin:
-        for plugin in args.plugin:
-            for module in ('turbo_tunnel.plugins.%s' % plugin, plugin):
-                try:
-                    __import__(module)
-                except ImportError:
-                    pass
-                else:
-                    break
-            else:
-                utils.logger.error('Load plugin %s failed' % plugin)
 
     tunnel_server.start()
     try:
