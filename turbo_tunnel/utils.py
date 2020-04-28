@@ -8,6 +8,7 @@ import socket
 import urllib.parse
 
 import tornado.iostream
+import tornado.netutil
 
 logger = logging.getLogger('turbo-tunnel')
 
@@ -59,6 +60,10 @@ class Url(object):
     @property
     def address(self):
         return self.host, self.port
+
+    @property
+    def auth(self):
+        return self._auth
 
     @property
     def path(self):
@@ -185,5 +190,18 @@ class TunnelClosedError(TunnelError):
     pass
 
 
+class TunnelPacketError(TunnelError):
+    pass
+
+
 class ParamError(RuntimeError):
     pass
+
+
+async def resolve_address(address):
+    if not tornado.netutil.is_valid_ip(address[0]):
+        resovler = tornado.netutil.Resolver()
+        addr_list = await resovler.resolve(*address)
+        return addr_list[0][1]
+    else:
+        return address
