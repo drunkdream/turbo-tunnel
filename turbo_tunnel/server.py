@@ -31,6 +31,10 @@ class TunnelServer(object):
         if not server_class:
             raise RuntimeError('%s tunnel server not registered' %
                                listen_url.protocol.upper())
+        for tunnel in tunnel_urls:
+            if not registry.tunnel_registry[tunnel.protocol]:
+                raise RuntimeError('%s tunnel not registered' %
+                                   tunnel.protocol.upper())
         instance = object.__new__(server_class)
         instance.__init__(listen_url, tunnel_router, tunnel_urls, True)
         return instance
