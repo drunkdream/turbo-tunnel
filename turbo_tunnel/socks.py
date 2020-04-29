@@ -119,6 +119,13 @@ class Socks4TunnelServer(server.TCPTunnelServer):
                 break
         assert not buffer
         target_address = request.address
+        auth_data = self._listen_url.auth
+        if auth_data and request.userid != auth_data:
+            utils.logger.info('[%s] Connection to %s:%d refused due to wrong userid' % (self.__class__.__name__, target_address[0], target_address[1]))
+            response = Socks4ResponsePacket(False)
+            await downstream.write(response.serialize())
+            stream.close()
+            return
 
         with server.TunnelConnection(address, target_address) as tun_conn:
             with self.create_tunnel_chain() as tunnel_chain:
