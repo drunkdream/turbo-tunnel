@@ -8,8 +8,10 @@ import re
 import socket
 import time
 
+import tornado.httputil
 import tornado.websocket
 
+from . import auth
 from . import registry
 from . import server
 from . import tunnel
@@ -27,6 +29,8 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         self._closed = False
         self.__timeout = timeout
         compression_options = None
+        if isinstance(headers, dict):
+            headers = tornado.httputil.HTTPHeaders(headers)
         request = tornado.httpclient.HTTPRequest(self._url,
                                                  headers=headers,
                                                  connect_timeout=timeout,
@@ -134,8 +138,13 @@ class WebSocketTunnel(tunnel.Tunnel):
         self._upstream = None
 
     async def connect(self):
+        headers = {}
+        auth_data = self._url.auth
+        if auth_data:
+            headers['Proxy-Authorization'] = 'Basic %s' % auth.http_basic_auth(
+                *auth_data.split(':'))
         self._upstream = WebSocketTunnelConnection(self._tunnel.stream,
-                                                   str(self._url))
+                                                   str(self._url), headers)
         return await self._upstream.wait_for_connecting()
 
     async def read(self):
@@ -212,6 +221,23 @@ class WebSocketTunnelServer(server.TunnelServer):
                 if not address:
                     self.set_status(404, "Not Found")
                     return False
+                auth_data = this._listen_url.auth
+                if auth_data:
+                    auth_data = auth_data.split(':')
+                    for header in self.request.headers:
+                        if header == 'Proxy-Authorization':
+                            value = self.request.headers[header]
+                            auth_type, auth_value = value.split()
+                            if auth_type == 'Basic' and auth_value == auth.http_basic_auth(
+                                    *auth_data):
+                                break
+                    else:
+                        utils.logger.info(
+                            '[%s] Connection to %s:%d refused due to wrong auth'
+                            %
+                            (self.__class__.__name__, address[0], address[1]))
+                        self.set_status(403, 'Forbidden')
+                        return False
 
                 self._tun_conn = server.TunnelConnection(
                     self.request.connection.context.address, address)

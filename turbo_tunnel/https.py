@@ -8,6 +8,7 @@ import re
 import tornado.iostream
 import tornado.web
 
+from . import auth
 from . import chain
 from . import registry
 from . import server
@@ -28,8 +29,13 @@ class HTTPSTunnel(tunnel.TCPTunnel):
         return self._tunnel.stream
 
     async def connect(self):
-        data = 'CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n\r\n' % (
+        data = 'CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n' % (
             self._addr, self._port, self._addr, self._port)
+        auth_data = self._url.auth
+        if auth_data:
+            data += 'Proxy-Authorization: Basic %s\r\n' % auth.http_basic_auth(
+                *auth_data.split(':'))
+        data += '\r\n'
         await self._tunnel.write(data.encode())
         buffer = b''
         while True:
@@ -61,6 +67,7 @@ class DefaultHandler(tornado.web.RequestHandler):
 class HTTPRouter(tornado.routing.Router):
     '''Support CONNECT method
     '''
+
     def __init__(self, app, handlers=None):
         self._app = app
         self._handlers = handlers or []
@@ -87,6 +94,7 @@ class HTTPRouter(tornado.routing.Router):
 class HTTPSTunnelServer(server.TunnelServer):
     '''HTTPS Tunnel Server
     '''
+
     def post_init(self):
         this = self
 
@@ -100,6 +108,25 @@ class HTTPSTunnelServer(server.TunnelServer):
                 address[1] = int(address[1])
                 address = tuple(address)
                 downstream = utils.TCPStream(self.request.connection.detach())
+                auth_data = this._listen_url.auth
+                if auth_data:
+                    auth_data = auth_data.split(':')
+                    for header in self.request.headers:
+                        if header == 'Proxy-Authorization':
+                            value = self.request.headers[header]
+                            auth_type, auth_value = value.split()
+                            if auth_type == 'Basic' and auth_value == auth.http_basic_auth(
+                                    *auth_data):
+                                break
+                    else:
+                        utils.logger.info(
+                            '[%s] Connection to %s:%d refused due to wrong auth'
+                            %
+                            (self.__class__.__name__, address[0], address[1]))
+                        await downstream.write(
+                            b'HTTP/1.1 403 Forbidden\r\n\r\n')
+                        self._finished = True
+                        return
                 with server.TunnelConnection(
                         self.request.connection.context.address,
                         address) as tun_conn:
