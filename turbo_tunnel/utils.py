@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 '''Miscellaneous utility functions and classes
 '''
 

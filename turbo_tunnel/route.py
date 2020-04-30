@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-'''Tunnel route
+'''Tunnel Route
 '''
 
 class TunnelRouter(object):
