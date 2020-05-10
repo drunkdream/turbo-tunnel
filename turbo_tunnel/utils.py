@@ -37,6 +37,8 @@ class Url(object):
             port = ''
         elif self._protocol in ('https', 'wss') and port == 443:
             port = ''
+        elif self._protocol in ('ssh',) and port == 22:
+            port = ''
         elif port:
             port = ':%d' % port
         return '%s://%s%s%s' % (self._protocol, self._host, port, self._path)
@@ -57,6 +59,8 @@ class Url(object):
             return 80
         elif self.protocol in ('https', 'wss'):
             return 443
+        elif self.protocol in ('ssh',):
+            return 22
 
     @property
     def address(self):
