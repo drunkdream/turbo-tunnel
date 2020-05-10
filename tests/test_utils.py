@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 '''
 '''
 
@@ -11,8 +10,6 @@ import pytest
 import tornado
 
 from turbo_tunnel import utils
-
-from .util import DemoTCPServer
 
 
 def test_url():
@@ -33,18 +30,6 @@ def test_url():
     url = utils.Url('tcp://:8080/')
     assert url.host == '0.0.0.0'
 
-
-@pytest.mark.asyncio
-async def test_tcp_stream():
-    server = DemoTCPServer()
-    port = random.randint(1000, 65000)
-    server.listen(port)
-    s = socket.socket()
-    stream = utils.TCPStream(s)
-    await stream.connect(('127.0.0.1', port))
-    data = b'Hello world\n'
-    await stream.write(data)
-    buffer = await stream.read()
-    assert buffer == data
-    server.stop()
+    url = utils.Url('ssh://127.0.0.1')
+    assert url.port == 22
 
