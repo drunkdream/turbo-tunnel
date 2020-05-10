@@ -34,6 +34,12 @@ class Tunnel(utils.IStream):
     def has_cache(cls, url):
         return False
 
+    @property
+    def socket(self):
+        if self._tunnel:
+            return self._tunnel.socket
+        return None
+
     def on_read(self, buffer):
         utils.logger.debug('[%s] Recv %d bytes from upstream' %
                            (self.__class__.__name__, len(buffer)))
