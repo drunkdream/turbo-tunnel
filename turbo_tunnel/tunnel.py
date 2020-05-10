@@ -142,6 +142,9 @@ class TCPTunnel(Tunnel):
         if self._stream:
             self._stream.close()
             self._stream = None
+        elif self._tunnel:
+            self._tunnel.close()
+            self._tunnel = None
 
 
 class TunnelTransport(asyncio.Transport):
