@@ -112,7 +112,7 @@ class Socks4Tunnel(tunnel.TCPTunnel):
 class Socks4TunnelServer(server.TCPTunnelServer):
 
     async def handle_stream(self, stream, address):
-        downstream = utils.TCPStream(stream)
+        downstream = tunnel.TCPTunnel(stream)
         buffer = await downstream.read()
         while True:
             request, buffer = Socks4RequestPacket.unserialize_from(buffer)
