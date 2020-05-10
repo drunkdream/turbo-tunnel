@@ -25,7 +25,6 @@ class SSHTunnel(tunnel.Tunnel):
     @classmethod
     def has_cache(cls, url):
         key = '%s:%d' % url.address
-        print(key, cls.ssh_conns.keys())
         return key in cls.ssh_conns
 
     async def create_ssh_conn(self):
@@ -37,7 +36,9 @@ class SSHTunnel(tunnel.Tunnel):
             options['username'] = username
             options['password'] = password
             options = asyncssh.SSHClientConnectionOptions(**options)
-            utils.logger.info('[%s] Create connection to ssh server %s:%d' % (self.__class__.__name__, self._url.host, self._url.port))
+            utils.logger.info(
+                '[%s] Create connection to ssh server %s:%d' %
+                (self.__class__.__name__, self._url.host, self._url.port))
             ssh_conn = asyncssh.SSHClientConnection(self._url.host,
                                                     self._url.port,
                                                     loop,
@@ -59,6 +60,7 @@ class SSHTunnel(tunnel.Tunnel):
         if not ssh_conn:
             return False
         this = self
+
         class SSHTCPSession(asyncssh.SSHTCPSession):
             def data_received(self, data, datatype):
                 this._buffer += data
@@ -71,14 +73,17 @@ class SSHTunnel(tunnel.Tunnel):
         return True
 
     async def read(self):
-        buffer = await self._reader.read(4096)
-        if buffer:
-            return buffer
-        else:
-            raise utils.TunnelClosedError
+        if self._reader:
+            buffer = await self._reader.read(4096)
+            if buffer:
+                return buffer
+        raise utils.TunnelClosedError()
 
     async def write(self, buffer):
-        return self._writer.write(buffer)
+        if self._writer:
+            return self._writer.write(buffer)
+        else:
+            raise utils.TunnelClosedError()
 
     def close(self):
         if self._writer:
