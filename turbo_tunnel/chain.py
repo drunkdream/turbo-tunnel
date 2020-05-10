@@ -112,8 +112,8 @@ class TunnelChain(object):
                 raise utils.TunnelError('%s tunnel not registered' %
                                         url.protocol.upper())
             next_address = address
-            if i < len(self._tunnel_urls) - 1:
-                next_url = self._tunnel_urls[i + 1]
+            if i < len(tunnel_urls) - 1:
+                next_url = tunnel_urls[i + 1]
                 next_address = next_url.host, next_url.port
             tunn = tunnel_class(tunn, url, next_address)
             self._tunnel_list.append(tunn)
