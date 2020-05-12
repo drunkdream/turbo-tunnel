@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 '''Miscellaneous utility functions and classes
 '''
 
@@ -36,6 +37,8 @@ class Url(object):
             port = ''
         elif self._protocol in ('https', 'wss') and port == 443:
             port = ''
+        elif self._protocol in ('ssh',) and port == 22:
+            port = ''
         elif port:
             port = ':%d' % port
         return '%s://%s%s%s' % (self._protocol, self._host, port, self._path)
@@ -56,6 +59,8 @@ class Url(object):
             return 80
         elif self.protocol in ('https', 'wss'):
             return 443
+        elif self.protocol in ('ssh',):
+            return 22
 
     @property
     def address(self):
@@ -63,7 +68,7 @@ class Url(object):
 
     @property
     def auth(self):
-        return self._auth
+        return urllib.parse.unquote(self._auth)
 
     @property
     def path(self):
@@ -112,62 +117,6 @@ class IStream(object):
         raise NotImplementedError(
             '%s.%s' %
             (self.__class__.__name__, inspect.currentframe().f_code.co_name))
-
-
-class TCPStream(IStream):
-    '''IOStream Wrapper
-    '''
-
-    def __init__(self, socket_or_stream):
-        if isinstance(socket_or_stream, socket.socket):
-            self._stream = tornado.iostream.IOStream(socket_or_stream)
-        else:
-            self._stream = socket_or_stream
-
-    def __getattr__(self, attr):
-        try:
-            return getattr(self._stream, attr)
-        except AttributeError:
-            raise AttributeError("'%s' object has no attribute '%s'" %
-                                 (self.__class__.__name__, attr))
-
-    @property
-    def socket(self):
-        return self._stream.socket
-
-    @property
-    def stream(self):
-        return self._stream
-
-    @property
-    def target_address(self):
-        if self.socket:
-            return self.socket.getpeername()
-        else:
-            return None
-
-    async def connect(self, address):
-        return await self._stream.connect(address)
-
-    def close(self):
-        if self._stream:
-            self._stream.close()
-            self._stream = None
-
-    async def read(self):
-        try:
-            buffer = await self._stream.read_bytes(4096, partial=True)
-        except tornado.iostream.StreamClosedError:
-            pass
-        else:
-            if buffer:
-                return buffer
-        raise TunnelClosedError()
-
-    async def write(self, buffer):
-        if not self._stream:
-            raise TunnelClosedError
-        await self._stream.write(buffer)
 
 
 class TimeoutError(RuntimeError):

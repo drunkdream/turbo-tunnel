@@ -10,6 +10,7 @@ import socket
 import pytest
 
 from turbo_tunnel import https
+from turbo_tunnel import tunnel
 from turbo_tunnel import utils
 
 from .util import DemoTCPServer
@@ -27,8 +28,8 @@ async def test_https_tunnel_server():
     server2.listen(port2)
 
     s = socket.socket()
-    tun = utils.TCPStream(s)
-    await tun.connect(('127.0.0.1', port1))
+    tun = tunnel.TCPTunnel(s, address=('127.0.0.1', port1))
+    await tun.connect()
 
     await tun.write(b'CONNECT 127.0.0.1:%d HTTP/1.1\r\n\r\n' % port2)
     response = await tun.read()
@@ -59,8 +60,8 @@ async def test_https_tunnel_server_auto_close():
     server2.listen(port2)
 
     s = socket.socket()
-    tun = utils.TCPStream(s)
-    await tun.connect(('127.0.0.1', port1))
+    tun = tunnel.TCPTunnel(s, address=('127.0.0.1', port1))
+    await tun.connect()
 
     await tun.write(b'CONNECT 127.0.0.1:%d HTTP/1.1\r\n\r\n' % port2)
     response = await tun.read()

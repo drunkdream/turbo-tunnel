@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-'''
+
+'''Tunnel Server
 '''
 
 import asyncio
@@ -182,7 +183,7 @@ class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
 
     async def handle_stream(self, stream, address):
         target_address = self._tunnel_urls[-1].host, self._tunnel_urls[-1].port
-        downstream = utils.TCPStream(stream)
+        downstream = tunnel.TCPTunnel(stream)
         with TunnelConnection(address, target_address) as tun_conn:
             with self.create_tunnel_chain() as tunnel_chain:
                 try:

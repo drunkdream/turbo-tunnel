@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 '''HTTPS Tunnel
 '''
 
@@ -107,7 +108,7 @@ class HTTPSTunnelServer(server.TunnelServer):
                 address = self.request.path.split(':')
                 address[1] = int(address[1])
                 address = tuple(address)
-                downstream = utils.TCPStream(self.request.connection.detach())
+                downstream = tunnel.TCPTunnel(self.request.connection.detach())
                 auth_data = this._listen_url.auth
                 if auth_data:
                     auth_data = auth_data.split(':')
