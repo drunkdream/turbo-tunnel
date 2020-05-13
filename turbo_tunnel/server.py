@@ -23,7 +23,7 @@ class TunnelServer(object):
     def __new__(cls, listen_url, tunnel_router_or_urls):
         listen_url = utils.Url(listen_url)
         tunnel_router = None
-        tunnel_urls = None
+        tunnel_urls = []
         if isinstance(tunnel_router_or_urls, route.TunnelRouter):
             tunnel_router = tunnel_router_or_urls
         else:

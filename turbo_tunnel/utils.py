@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 '''Miscellaneous utility functions and classes
 '''
 
@@ -37,11 +36,18 @@ class Url(object):
             port = ''
         elif self._protocol in ('https', 'wss') and port == 443:
             port = ''
-        elif self._protocol in ('ssh',) and port == 22:
+        elif self._protocol in ('ssh', ) and port == 22:
             port = ''
         elif port:
             port = ':%d' % port
         return '%s://%s%s%s' % (self._protocol, self._host, port, self._path)
+
+    def __eq__(self, other):
+        if not other:
+            return False
+        if not isinstance(other, Url):
+            other = Url(other)
+        return self.protocol == other.protocol and self.host == other.host and self.port == other.port and self.path == other.path
 
     @property
     def protocol(self):
@@ -59,7 +65,7 @@ class Url(object):
             return 80
         elif self.protocol in ('https', 'wss'):
             return 443
-        elif self.protocol in ('ssh',):
+        elif self.protocol in ('ssh', ):
             return 22
 
     @property
@@ -147,10 +153,16 @@ class ParamError(RuntimeError):
     pass
 
 
+def is_ip_address(addr):
+    return tornado.netutil.is_valid_ip(addr)
+
+
 async def resolve_address(address):
     if not tornado.netutil.is_valid_ip(address[0]):
         resovler = tornado.netutil.Resolver()
         addr_list = await resovler.resolve(*address)
-        return addr_list[0][1]
-    else:
-        return address
+        for it in addr_list:
+            if it[0] == socket.AddressFamily:
+                return it[1]
+
+    return address
