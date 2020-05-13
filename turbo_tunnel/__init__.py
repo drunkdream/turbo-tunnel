@@ -3,15 +3,18 @@
 '''Turbo tunnel
 '''
 
-VERSION = '0.4.0'
+VERSION = '0.4.1'
 
+import sys
 import traceback
 
 try:
     from . import https
     from . import server
     from . import socks
-    from . import ssh
+    if sys.version_info[1] >= 6:
+        # ssh disabled in python 3.5
+        from . import ssh
     from . import tunnel
     from . import websocket
 except ImportError:

@@ -7,6 +7,9 @@
  \/    \__,_|_|  |_.__/ \___/\/    \__,_|_| |_|_| |_|\___|_| 
 ```
 
+[![PyPi version](https://img.shields.io/pypi/v/turbo-tunnel.svg)](https://pypi.python.org/pypi/turbo-tunnel/) 
+![Unittest](https://github.com/drunkdream/turbo-tunnel/workflows/Unittest/badge.svg)
+
 ## 环境要求
 
 * 操作系统： `Windows`、`Linux`、`MacOS`
