@@ -1,4 +1,4 @@
-asyncssh
+asyncssh; python_version >= '3.6'
 python-daemon
 pyyaml
 tornado==6.0.4
