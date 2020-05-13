@@ -147,6 +147,14 @@ class ParamError(RuntimeError):
     pass
 
 
+def is_ip_address(addr):
+    try:
+        socket.inet_aton(addr)
+        return True
+    except socket.error:
+        return False
+
+
 async def resolve_address(address):
     if not tornado.netutil.is_valid_ip(address[0]):
         resovler = tornado.netutil.Resolver()
