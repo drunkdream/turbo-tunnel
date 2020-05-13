@@ -10,10 +10,10 @@ class TunnelRouter(object):
     def __init__(self, conf):
         self._conf = conf
 
-    def select(self, address):
+    async def select(self, address):
         hit_rules = []
         for rule in self._conf.rules:
-            if rule.is_hit(address):
+            if await rule.is_hit(address):
                 hit_rules.append(rule)
         if not hit_rules:
             # select default tunnel

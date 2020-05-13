@@ -69,7 +69,7 @@ class TunnelChain(object):
 
     async def create_tunnel(self, address):
         if self._tunnel_router:
-            selected_tunnel = self._tunnel_router.select(address)
+            selected_tunnel = await self._tunnel_router.select(address)
             if not selected_tunnel:
                 utils.logger.warn(
                     '[%s] No tunnel for %s:%d, maybe blocked' %

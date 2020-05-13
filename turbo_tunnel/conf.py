@@ -78,10 +78,15 @@ class TunnelRule(object):
     def tunnel(self):
         return self._tunnel
 
-    def is_hit(self, address):
-        addr, port = address
+    async def is_hit(self, address):
+        host, port = address
+        addr = None
+        if not utils.is_ip_address(host):
+            addr, port = await utils.resolve_address(address)
         for tmpl in self._addr_list:
-            if fnmatch.fnmatch(addr, tmpl.strip()):
+            if fnmatch.fnmatch(host, tmpl.strip()):
+                break
+            if addr and fnmatch.fnmatch(addr, tmpl.strip()):
                 break
         else:
             return False
