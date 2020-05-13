@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import socket
+from unittest.mock import patch
 
 import pytest
 
@@ -34,11 +36,13 @@ async def test_tunnel_rule():
     })
     assert rule.id == 'test'
     assert rule.priority == 100
-    assert await rule.is_hit(('www.baidu.com', 80)) == True
-    assert await rule.is_hit(('baidu.com', 80)) == False
-    assert await rule.is_hit(('www.baidu.com', 801)) == False
-    assert await rule.is_hit(('www.qq.com', 443)) == True
-    assert await rule.is_hit(('www.qq.com', 5555)) == True
-    assert await rule.is_hit(('www.qq.com', 5566)) == True
-    assert await rule.is_hit(('www.qq.com', 5567)) == False
-    assert await rule.is_hit(('wwww.qq.com', 5555)) == False
+    with patch('socket.getaddrinfo') as mocked_getaddrinfo:
+        mocked_getaddrinfo.side_effect = lambda *args: [(socket.AddressFamily(2), ('1.1.1.1', 0))]
+        assert await rule.is_hit(('www.baidu.com', 80)) == True
+        assert await rule.is_hit(('baidu.com', 80)) == False
+        assert await rule.is_hit(('www.baidu.com', 801)) == False
+        assert await rule.is_hit(('www.qq.com', 443)) == True
+        assert await rule.is_hit(('www.qq.com', 5555)) == True
+        assert await rule.is_hit(('www.qq.com', 5566)) == True
+        assert await rule.is_hit(('www.qq.com', 5567)) == False
+        assert await rule.is_hit(('wwww.qq.com', 5555)) == False
