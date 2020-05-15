@@ -153,18 +153,21 @@ class HTTPSTunnelServer(server.TunnelServer):
                             self._finished = True
                             return
                         else:
-                            await downstream.write(
-                                b'HTTP/1.1 200 HTTPSTunnel Established\r\n\r\n'
-                            )
-                        tasks = [
-                            this.forward_data_to_upstream(
-                                tun_conn, downstream, tunnel_chain.tail),
-                            this.forward_data_to_downstream(
-                                tun_conn, downstream, tunnel_chain.tail)
-                        ]
-                        await asyncio.wait(tasks,
-                                           return_when=asyncio.FIRST_COMPLETED)
-
+                            if not downstream.closed():
+                                await downstream.write(
+                                    b'HTTP/1.1 200 HTTPSTunnel Established\r\n\r\n'
+                                )
+                                tasks = [
+                                    this.forward_data_to_upstream(
+                                        tun_conn, downstream, tunnel_chain.tail),
+                                    this.forward_data_to_downstream(
+                                        tun_conn, downstream, tunnel_chain.tail)
+                                ]
+                                await asyncio.wait(tasks,
+                                                return_when=asyncio.FIRST_COMPLETED)
+                            else:
+                                utils.logger.warn('[%s] Downstream closed unexpectedly' % self.__class__.__name__)
+                                tun_conn.on_downstream_closed()
                         downstream.close()
                         self._finished = True
 

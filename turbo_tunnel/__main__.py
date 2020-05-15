@@ -32,13 +32,16 @@ def main():
                         type=int,
                         help='retry connect count',
                         default=0)
-    parser.add_argument('-d', '--daemon',
+    parser.add_argument('--auto-reload',
+                        help='auto reload config file',
+                        action='store_true',
+                        default=False)
+    parser.add_argument('-d',
+                        '--daemon',
                         help='run as daemon',
                         action='store_true',
                         default=False)
-    parser.add_argument('-p', '--plugin',
-                        help='load plugin',
-                        action='append')
+    parser.add_argument('-p', '--plugin', help='load plugin', action='append')
 
     args = sys.argv[1:]
     if not args:
@@ -64,7 +67,7 @@ def main():
         if not os.path.exists(args.config):
             print('Config file %s not exist' % args.config, file=sys.stderr)
             return -1
-        config = conf.TunnelConfiguration(args.config)
+        config = conf.TunnelConfiguration(args.config, args.auto_reload)
         router = route.TunnelRouter(config)
         tunnel_server = server.TunnelServer(config.listen_url, router)
     elif args.listen:
@@ -84,6 +87,10 @@ def main():
         import daemon
         daemon.DaemonContext(stderr=open('error.txt', 'w')).open()
 
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("[%(asctime)s][%(levelname)s]%(message)s")
+    handler.setFormatter(formatter)
+
     if args.log_level == 'debug':
         utils.logger.setLevel(logging.DEBUG)
     elif args.log_level == 'info':
@@ -92,10 +99,10 @@ def main():
         utils.logger.setLevel(logging.WARN)
     elif args.log_level == 'error':
         utils.logger.setLevel(logging.ERROR)
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter("[%(asctime)s][%(levelname)s]%(message)s")
-    handler.setFormatter(formatter)
+
+    utils.logger.propagate = 0
     utils.logger.addHandler(handler)
+
     if log_file:
         handler = logging.handlers.RotatingFileHandler(log_file,
                                                        maxBytes=10 * 1024 *

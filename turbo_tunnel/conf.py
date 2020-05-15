@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-
 '''Tunnel configuration
 '''
 
+import asyncio
 import fnmatch
 import os
 
@@ -12,7 +12,6 @@ from . import utils
 
 
 class Tunnel(object):
-
     def __init__(self, tunnel):
         self._id = tunnel['id']
         self._url = utils.Url(tunnel['url'])
@@ -20,7 +19,8 @@ class Tunnel(object):
         self._dependency = tunnel.get('dependency', None)
 
     def __str__(self):
-        return '<Tunnel object id=%s url=%s at 0x%.x>' % (self._id, self._url, id(self))
+        return '<Tunnel object id=%s url=%s at 0x%.x>' % (self._id, self._url,
+                                                          id(self))
 
     @property
     def id(self):
@@ -55,7 +55,6 @@ class Tunnel(object):
 
 
 class TunnelRule(object):
-
     def __init__(self, rule):
         self._id = rule['id']
         self._priority = rule.get('priority', 0)
@@ -107,23 +106,60 @@ class TunnelRule(object):
 class TunnelConfiguration(object):
     '''Tunnel Configuration
     '''
+    reload_interval = 1
 
-    def __init__(self, conf_file):
+    def __init__(self, conf_file, auto_reload=False):
         self._conf_file = conf_file
         if not os.path.exists(self._conf_file):
-            raise RuntimeError('Configuration file %s not exist' % self._conf_file)
-        self._conf_obj = self.parse()
-        self._tunnels = []
-        for tunnel in self._conf_obj['tunnels']:
-            self._tunnels.append(Tunnel(tunnel))
-        self._rules = []
-        for rule in self._conf_obj['rules']:
-            self._rules.append(TunnelRule(rule))
+            raise RuntimeError('Configuration file %s not exist' %
+                               self._conf_file)
+        self._auto_reload = auto_reload
+        self._last_modified = None
+        self.load()
+        if self._auto_reload:
+            asyncio.ensure_future(self.reload_task())
+
+    async def reload_task(self):
+        while True:
+            await asyncio.sleep(self.reload_interval)
+            self.load()
 
     def parse(self):
         with open(self._conf_file) as fp:
             text = fp.read()
-            return yaml.safe_load(text)
+            try:
+                return yaml.safe_load(text)
+            except:
+                utils.logger.warn('[%s] Ignore invalid config file' %
+                                  self.__class__.__name__)
+                return None
+
+    def load(self):
+        if not os.path.exists(self._conf_file):
+            utils.logger.warn('[%s] Config file not exist' %
+                              self.__class__.__name__)
+            return
+        last_modified = os.path.getmtime(self._conf_file)
+        if not self._last_modified or last_modified > self._last_modified:
+            if self._last_modified:
+                utils.logger.info('[%s] Reload config file' %
+                                  self.__class__.__name__)
+            config = self.parse()
+            if not config:
+                return
+            self._conf_obj = config
+            if not self._conf_obj.get('version'):
+                raise utils.ConfigError('Field `version` not found')
+            elif not self._conf_obj.get('listen'):
+                raise utils.ConfigError('Field `listen` not found')
+
+            self._tunnels = []
+            for tunnel in self._conf_obj.get('tunnels', []):
+                self._tunnels.append(Tunnel(tunnel))
+            self._rules = []
+            for rule in self._conf_obj.get('rules', []):
+                self._rules.append(TunnelRule(rule))
+            self._last_modified = last_modified
 
     @property
     def version(self):
@@ -153,4 +189,3 @@ class TunnelConfiguration(object):
                 return tunnel
         else:
             raise RuntimeError('Tunnel %s not found' % id)
-
