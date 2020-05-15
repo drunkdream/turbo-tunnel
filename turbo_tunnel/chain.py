@@ -3,6 +3,7 @@
 '''
 
 import socket
+import time
 
 import tornado.iostream
 
@@ -106,6 +107,7 @@ class TunnelChain(object):
             tunnel_urls = tunnel_urls[cached_tunnel_index:]
             tunn = None
 
+        time0 = time.time()
         for i, url in enumerate(tunnel_urls):
             tunnel_class = registry.tunnel_registry[url.protocol]
             if not tunnel_class:
@@ -122,8 +124,8 @@ class TunnelChain(object):
                 raise utils.TunnelConnectError('Connect %s failed' % tunn)
             utils.logger.debug('[%s] Tunnel to %s established' %
                                (self.__class__.__name__, url))
-        utils.logger.info('[%s] Create tunnel to %s:%d success' %
-                          (self.__class__.__name__, address[0], address[1]))
+        utils.logger.info('[%s][%.3f] Create tunnel to %s:%d success' %
+                          (self.__class__.__name__, (time.time() - time0), address[0], address[1]))
 
     def close(self):
         tunnel = self.tail
