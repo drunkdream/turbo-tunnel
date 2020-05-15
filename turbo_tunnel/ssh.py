@@ -32,9 +32,10 @@ class SSHTunnel(tunnel.Tunnel):
         if key not in self.__class__.ssh_conns:
             loop = asyncio.get_event_loop()
             options = {}
-            username, password = self._url.auth.split(':', 1)
-            options['username'] = username
-            options['password'] = password
+            if self._url.auth:
+                username, password = self._url.auth.split(':', 1)
+                options['username'] = username
+                options['password'] = password
             options = asyncssh.SSHClientConnectionOptions(**options)
             utils.logger.info(
                 '[%s] Create connection to ssh server %s:%d' %
