@@ -125,6 +125,10 @@ class IStream(object):
             (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
 
+class ConfigError(RuntimeError):
+    pass
+
+
 class TimeoutError(RuntimeError):
     pass
 
