@@ -23,8 +23,8 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
     '''WebSocket Client Support using exist connection 
     '''
 
-    def __init__(self, stream, url, headers=None, timeout=15):
-        self._stream = stream
+    def __init__(self, tunnel, url, headers=None, timeout=15):
+        self._tunnel = tunnel
         self._url = url
         self._connected = None
         self._closed = False
@@ -42,11 +42,11 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
               self).__init__(request,
                              on_message_callback=self.on_message,
                              compression_options=compression_options)
-        self._patcher = self._patch_tcp_client(self._stream)
+        self._patcher = self._patch_tcp_client(self._tunnel)
         self._patcher.patch()
         self._buffer = b''
 
-    def _patch_tcp_client(self, stream):
+    def _patch_tcp_client(self, tunn):
         TCPClient = tornado.tcpclient.TCPClient
 
         async def connect(tcp_client,
@@ -58,7 +58,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
                           source_ip=None,
                           source_port=None,
                           timeout=None):
-            return stream
+            return tunnel.TunnelIOStream(tunn)
 
         class TCPClientPatchContext(object):
             def __init__(self, patched_connect):
@@ -115,7 +115,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             raise utils.TunnelClosedError()
 
         while not self._buffer:
-            await tornado.gen.sleep(0.005)
+            await tornado.gen.sleep(0.001)
         buffer = self._buffer
         self._buffer = b''
         return buffer
@@ -144,7 +144,7 @@ class WebSocketTunnel(tunnel.Tunnel):
         if auth_data:
             headers['Proxy-Authorization'] = 'Basic %s' % auth.http_basic_auth(
                 *auth_data.split(':'))
-        self._upstream = WebSocketTunnelConnection(self._tunnel.stream,
+        self._upstream = WebSocketTunnelConnection(self._tunnel,
                                                    str(self._url), headers)
         return await self._upstream.wait_for_connecting()
 
