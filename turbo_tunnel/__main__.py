@@ -122,6 +122,9 @@ def main():
         tornado.ioloop.IOLoop.current().start()
     except KeyboardInterrupt:
         registry.plugin_registry.notify('unload')
+        tasks = utils.AsyncTaskManager().running_tasks
+        for task in tasks:
+            print('Task %s can\'t auto exit' % task, file=sys.stderr)
         print('Process exit warmly.')
 
 
