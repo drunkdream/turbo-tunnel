@@ -100,7 +100,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         time0 = time.time()
         while time.time() - time0 < self.__timeout:
             if self._connected == None:
-                await tornado.gen.sleep(0.01)
+                await tornado.gen.sleep(0.001)
                 continue
             self._patcher.unpatch()
             return self._connected
@@ -111,10 +111,9 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             return False
 
     async def read(self):
-        if self._closed:
-            raise utils.TunnelClosedError()
-
         while not self._buffer:
+            if self._closed:
+                raise utils.TunnelClosedError()
             await tornado.gen.sleep(0.001)
         buffer = self._buffer
         self._buffer = b''
@@ -172,7 +171,7 @@ class WebSocketDownStream(utils.IStream):
         while not self._buffer:
             if not self._handler:
                 raise utils.TunnelClosedError
-            await tornado.gen.sleep(0.005)
+            await tornado.gen.sleep(0.001)
         buffer = self._buffer
         self._buffer = b''
         return buffer
@@ -258,11 +257,11 @@ class WebSocketTunnelServer(server.TunnelServer):
                         self.set_status(403, 'Forbidden')
                     return False
                 self._downstream = WebSocketDownStream(self)
-                asyncio.ensure_future(
+                utils.AsyncTaskManager().start_task(
                     this.forward_data_to_upstream(self._tun_conn,
                                                   self._downstream,
                                                   self._tunnel_chain.tail))
-                asyncio.ensure_future(
+                utils.AsyncTaskManager().start_task(
                     this.forward_data_to_downstream(self._tun_conn,
                                                     self._downstream,
                                                     self._tunnel_chain.tail))
