@@ -61,7 +61,7 @@ class Tunnel(utils.IStream):
         time0 = time.time()
         while time.time() - time0 < self.__class__.timeout:
             if not self._connected:
-                await tornado.gen.sleep(0.001)
+                await utils.AsyncTaskManager().sleep()
             else:
                 break
         else:
@@ -190,7 +190,7 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
                 buffer = self._buffer
                 self._buffer = b''
                 return buffer
-            await asyncio.sleep(0.001)
+            await utils.AsyncTaskManager().sleep()
         else:
             raise utils.TunnelClosedError(self)
 
@@ -202,7 +202,7 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
                 buffer = self._buffer[:m.end()]
                 self._buffer = self._buffer[m.end():]
                 return buffer
-            await asyncio.sleep(0.001)
+            await utils.AsyncTaskManager().sleep()
         else:
             raise utils.TunnelClosedError(self)
 

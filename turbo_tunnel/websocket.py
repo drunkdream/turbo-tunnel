@@ -100,7 +100,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         time0 = time.time()
         while time.time() - time0 < self.__timeout:
             if self._connected == None:
-                await tornado.gen.sleep(0.001)
+                await utils.AsyncTaskManager().sleep()
                 continue
             self._patcher.unpatch()
             return self._connected
@@ -114,7 +114,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         while not self._buffer:
             if self._closed:
                 raise utils.TunnelClosedError()
-            await tornado.gen.sleep(0.001)
+            await utils.AsyncTaskManager().sleep()
         buffer = self._buffer
         self._buffer = b''
         return buffer
@@ -171,7 +171,7 @@ class WebSocketDownStream(utils.IStream):
         while not self._buffer:
             if not self._handler:
                 raise utils.TunnelClosedError
-            await tornado.gen.sleep(0.001)
+            await utils.AsyncTaskManager().sleep()
         buffer = self._buffer
         self._buffer = b''
         return buffer
