@@ -45,6 +45,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         self._patcher = self._patch_tcp_client(self._tunnel)
         self._patcher.patch()
         self._buffer = b''
+        self._read_event = asyncio.Event()
 
     def _patch_tcp_client(self, tunn):
         TCPClient = tornado.tcpclient.TCPClient
@@ -95,12 +96,13 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             self._closed = True
         else:
             self._buffer += message
+        self._read_event.set()
 
     async def wait_for_connecting(self):
         time0 = time.time()
         while time.time() - time0 < self.__timeout:
             if self._connected == None:
-                await utils.AsyncTaskManager().sleep()
+                await asyncio.sleep(0.005)
                 continue
             self._patcher.unpatch()
             return self._connected
@@ -114,7 +116,8 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         while not self._buffer:
             if self._closed:
                 raise utils.TunnelClosedError()
-            await utils.AsyncTaskManager().sleep()
+            await self._read_event.wait()
+            self._read_event.clear()
         buffer = self._buffer
         self._buffer = b''
         return buffer
@@ -163,15 +166,18 @@ class WebSocketDownStream(utils.IStream):
     def __init__(self, handler):
         self._handler = handler
         self._buffer = b''
+        self._read_event = asyncio.Event()
 
     def on_recv(self, buffer):
         self._buffer += buffer
+        self._read_event.set()
 
     async def read(self):
         while not self._buffer:
             if not self._handler:
                 raise utils.TunnelClosedError
-            await utils.AsyncTaskManager().sleep()
+            await self._read_event.wait()
+            self._read_event.clear()
         buffer = self._buffer
         self._buffer = b''
         return buffer

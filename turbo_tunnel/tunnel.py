@@ -61,7 +61,7 @@ class Tunnel(utils.IStream):
         time0 = time.time()
         while time.time() - time0 < self.__class__.timeout:
             if not self._connected:
-                await utils.AsyncTaskManager().sleep()
+                await asyncio.sleep(0.005)
             else:
                 break
         else:
@@ -167,9 +167,12 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
         self._tunnel = tunnel
         self._buffer = b''
         self._close_callback = None
+        self._read_event = asyncio.Event()
         utils.AsyncTaskManager().start_task(self.transfer_data_task())
 
     async def transfer_data_task(self):
+        '''transfer data from tunnel to iostream
+        '''
         while self._tunnel:
             try:
                 buffer = await self._tunnel.read()
@@ -177,12 +180,25 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
                 break
             if buffer:
                 self._buffer += buffer
+                self._read_event.set()
             else:
                 break
 
+        self._read_event.set()
+
     async def read_bytes(self, num_bytes, partial=False):
-        while self._tunnel:
-            if len(self._buffer) >= num_bytes:
+        while True:
+            if not self._buffer or (not partial and len(self._buffer) < num_bytes):
+                if not self._tunnel:
+                    assert not self._buffer
+                    raise tornado.iostream.StreamClosedError()
+                if self._read_event.is_set():
+                    self._read_event.clear()
+                await self._read_event.wait()
+
+            if not self._buffer:
+                raise tornado.iostream.StreamClosedError()
+            elif len(self._buffer) >= num_bytes:
                 buffer = self._buffer[:num_bytes]
                 self._buffer = self._buffer[num_bytes:]
                 return buffer
@@ -190,21 +206,25 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
                 buffer = self._buffer
                 self._buffer = b''
                 return buffer
-            await utils.AsyncTaskManager().sleep()
-        else:
-            raise utils.TunnelClosedError(self)
 
     async def read_until_regex(self, regex, max_bytes=None):
         read_regex = re.compile(regex)
-        while self._tunnel:
+        while True:
+            if not self._buffer or (not partial and len(self._buffer) < num_bytes):
+                if not self._tunnel:
+                    assert not self._buffer
+                    raise tornado.iostream.StreamClosedError()
+                if self._read_event.is_set():
+                    self._read_event.clear()
+                await self._read_event.wait()
+
+            if not self._buffer:
+                raise tornado.iostream.StreamClosedError()
             m = read_regex.search(self._buffer)
             if m is not None:
                 buffer = self._buffer[:m.end()]
                 self._buffer = self._buffer[m.end():]
                 return buffer
-            await utils.AsyncTaskManager().sleep()
-        else:
-            raise utils.TunnelClosedError(self)
 
     def set_close_callback(self, callback):
         self._close_callback = callback
