@@ -103,6 +103,7 @@ class Singleton(object):
 class AsyncTaskManager(object):
     def __init__(self):
         self._async_tasks = []
+        self._sleep_task = None
 
     @property
     def running_tasks(self):
@@ -134,6 +135,13 @@ class AsyncTaskManager(object):
             if not task in self._async_tasks:
                 continue
             task_list[i].close()
+
+    async def sleep(self):
+        if not self._sleep_task:
+            # Avoid too many sleep tasks
+            self._sleep_task = asyncio.sleep(0.001)
+        await self._sleep_task
+        self._sleep_task = None
 
 
 class IStream(object):
