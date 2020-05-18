@@ -3,7 +3,7 @@
 '''
 
 import asyncio
-import inspect
+import re
 import socket
 import time
 
@@ -22,13 +22,17 @@ class Tunnel(utils.IStream):
         self._tunnel = tunnel
         self._url = url
         self._addr, self._port = address or (None, None)
-        if not self._addr or not self._port:
+        if (not self._addr or not self._port) and url:
             self._addr, self._port = url.host, url.port
+        assert (self._addr and self._port)
         self._running = True
         self._connected = False
 
     def __str__(self):
-        return '%s %s' % (self.__class__.__name__, self._url)
+        address = self._url
+        if not address:
+            address = '%s:%d' % (self._addr, self._port)
+        return '%s %s' % (self.__class__.__name__, address)
 
     @classmethod
     def has_cache(cls, url):
@@ -57,7 +61,7 @@ class Tunnel(utils.IStream):
         time0 = time.time()
         while time.time() - time0 < self.__class__.timeout:
             if not self._connected:
-                await tornado.gen.sleep(0.01)
+                await asyncio.sleep(0.005)
             else:
                 break
         else:
@@ -67,20 +71,23 @@ class Tunnel(utils.IStream):
 class TCPTunnel(Tunnel):
     '''TCP Tunnel
     '''
-    def __init__(self, tunnel, url=None, address=None):
+    def __init__(self, tunnel, url=None, address=None, server_side=False):
         self._stream = None
-        if isinstance(tunnel, Tunnel):
-            super(TCPTunnel, self).__init__(tunnel, url, address)
-        else:
-            self._tunnel = None
-            if url or address:
-                super(TCPTunnel, self).__init__(None, url, address)
-            if isinstance(tunnel, socket.socket):
-                self._stream = tornado.iostream.IOStream(tunnel)
-            elif isinstance(tunnel, tornado.iostream.IOStream):
-                self._stream = tunnel
+        if isinstance(tunnel, socket.socket):
+            self._stream = tornado.iostream.IOStream(tunnel)
+        elif isinstance(tunnel, tornado.iostream.IOStream):
+            self._stream = tunnel
+        elif not isinstance(tunnel, Tunnel):
+            raise ValueError('Invalid param: %r' % tunnel)
+
+        self._server_side = server_side
+        if self._stream and not address:
+            if server_side:
+                address = self._stream.socket.getsockname()
             else:
-                raise ValueError('Invalid param: %r' % tunnel)
+                address = self._stream.socket.getpeername()
+        super(TCPTunnel, self).__init__(tunnel if not self._stream else None,
+                                        url, address)
 
     def __getattr__(self, attr):
         if self._stream:
@@ -124,11 +131,11 @@ class TCPTunnel(Tunnel):
             else:
                 if buffer:
                     return buffer
-            raise utils.TunnelClosedError()
+            raise utils.TunnelClosedError(self)
         elif self._tunnel:
             return await self._tunnel.read()
         else:
-            raise utils.TunnelClosedError()
+            raise utils.TunnelClosedError(self)
 
     async def write(self, buffer):
         if self._stream:
@@ -136,15 +143,116 @@ class TCPTunnel(Tunnel):
         elif self._tunnel:
             return await self._tunnel.write(buffer)
         else:
-            raise utils.TunnelClosedError()
+            raise utils.TunnelClosedError(self)
 
     def close(self):
+        message = '[%s] %s%s closed' % (self.__class__.__name__,
+                                        ('Serverside '
+                                         if self._server_side else ''), self)
         if self._stream:
             self._stream.close()
             self._stream = None
+            utils.logger.debug(message)
         elif self._tunnel:
             self._tunnel.close()
             self._tunnel = None
+            utils.logger.debug(message)
+
+
+class TunnelIOStream(tornado.iostream.BaseIOStream):
+    '''Tunnel to IOStream
+    '''
+    def __init__(self, tunnel):
+        super(TunnelIOStream, self).__init__()
+        self._tunnel = tunnel
+        self._buffer = b''
+        self._close_callback = None
+        self._read_event = asyncio.Event()
+        utils.AsyncTaskManager().start_task(self.transfer_data_task())
+
+    async def transfer_data_task(self):
+        '''transfer data from tunnel to iostream
+        '''
+        while self._tunnel:
+            try:
+                buffer = await self._tunnel.read()
+            except utils.TunnelClosedError:
+                break
+            if buffer:
+                self._buffer += buffer
+                self._read_event.set()
+            else:
+                break
+
+        self._read_event.set()
+
+    async def read_bytes(self, num_bytes, partial=False):
+        while True:
+            if not self._buffer or (not partial and len(self._buffer) < num_bytes):
+                if not self._tunnel:
+                    assert not self._buffer
+                    raise tornado.iostream.StreamClosedError()
+                if self._read_event.is_set():
+                    self._read_event.clear()
+                await self._read_event.wait()
+
+            if not self._buffer:
+                raise tornado.iostream.StreamClosedError()
+            elif len(self._buffer) >= num_bytes:
+                buffer = self._buffer[:num_bytes]
+                self._buffer = self._buffer[num_bytes:]
+                return buffer
+            elif partial and self._buffer:
+                buffer = self._buffer
+                self._buffer = b''
+                return buffer
+
+    async def read_until_regex(self, regex, max_bytes=None):
+        read_regex = re.compile(regex)
+        while True:
+            if not self._buffer or (not partial and len(self._buffer) < num_bytes):
+                if not self._tunnel:
+                    assert not self._buffer
+                    raise tornado.iostream.StreamClosedError()
+                if self._read_event.is_set():
+                    self._read_event.clear()
+                await self._read_event.wait()
+
+            if not self._buffer:
+                raise tornado.iostream.StreamClosedError()
+            m = read_regex.search(self._buffer)
+            if m is not None:
+                buffer = self._buffer[:m.end()]
+                self._buffer = self._buffer[m.end():]
+                return buffer
+
+    def set_close_callback(self, callback):
+        self._close_callback = callback
+
+    def close(self, exc_info=False):
+        if self._close_callback:
+            self._close_callback()
+        if self._tunnel:
+            self._tunnel.close()
+            self._tunnel = None
+
+    def read_from_fd(self, buf):
+        if not self._buffer:
+            return None
+        elif len(buf) >= len(self._buffer):
+            buf[:] = self._buffer
+            read_size = len(self._buffer)
+            self._buffer = b''
+            return read_size
+        else:
+            array_size = len(buf)
+            buf[:] = self._buffer[:array_size]
+            self._buffer = self._buffer[array_size:]
+            return array_size
+
+    def write_to_fd(self, data):
+        utils.AsyncTaskManager().start_task(self._tunnel.write(data))
+        return len(data)
 
 
 class TunnelTransport(asyncio.Transport):
@@ -157,10 +265,10 @@ class TunnelTransport(asyncio.Transport):
         self._extra['socket'] = self._tunnel.socket
         self._extra['sockname'] = self._tunnel.socket.getsockname()
         self._extra['peername'] = self._tunnel.socket.getpeername()
-        asyncio.ensure_future(self.transfer_data_task())
+        utils.AsyncTaskManager().start_task(self.transfer_data_task())
 
     def write(self, data):
-        asyncio.ensure_future(self._tunnel.write(data))
+        utils.AsyncTaskManager().start_task(self._tunnel.write(data))
 
     def abort(self):
         self._tunnel.close()

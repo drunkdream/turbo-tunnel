@@ -23,8 +23,8 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
     '''WebSocket Client Support using exist connection 
     '''
 
-    def __init__(self, stream, url, headers=None, timeout=15):
-        self._stream = stream
+    def __init__(self, tunnel, url, headers=None, timeout=15):
+        self._tunnel = tunnel
         self._url = url
         self._connected = None
         self._closed = False
@@ -42,11 +42,12 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
               self).__init__(request,
                              on_message_callback=self.on_message,
                              compression_options=compression_options)
-        self._patcher = self._patch_tcp_client(self._stream)
+        self._patcher = self._patch_tcp_client(self._tunnel)
         self._patcher.patch()
         self._buffer = b''
+        self._read_event = asyncio.Event()
 
-    def _patch_tcp_client(self, stream):
+    def _patch_tcp_client(self, tunn):
         TCPClient = tornado.tcpclient.TCPClient
 
         async def connect(tcp_client,
@@ -58,7 +59,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
                           source_ip=None,
                           source_port=None,
                           timeout=None):
-            return stream
+            return tunnel.TunnelIOStream(tunn)
 
         class TCPClientPatchContext(object):
             def __init__(self, patched_connect):
@@ -95,12 +96,13 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             self._closed = True
         else:
             self._buffer += message
+        self._read_event.set()
 
     async def wait_for_connecting(self):
         time0 = time.time()
         while time.time() - time0 < self.__timeout:
             if self._connected == None:
-                await tornado.gen.sleep(0.01)
+                await asyncio.sleep(0.005)
                 continue
             self._patcher.unpatch()
             return self._connected
@@ -111,11 +113,11 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             return False
 
     async def read(self):
-        if self._closed:
-            raise utils.TunnelClosedError()
-
         while not self._buffer:
-            await tornado.gen.sleep(0.005)
+            if self._closed:
+                raise utils.TunnelClosedError()
+            await self._read_event.wait()
+            self._read_event.clear()
         buffer = self._buffer
         self._buffer = b''
         return buffer
@@ -144,7 +146,7 @@ class WebSocketTunnel(tunnel.Tunnel):
         if auth_data:
             headers['Proxy-Authorization'] = 'Basic %s' % auth.http_basic_auth(
                 *auth_data.split(':'))
-        self._upstream = WebSocketTunnelConnection(self._tunnel.stream,
+        self._upstream = WebSocketTunnelConnection(self._tunnel,
                                                    str(self._url), headers)
         return await self._upstream.wait_for_connecting()
 
@@ -164,15 +166,18 @@ class WebSocketDownStream(utils.IStream):
     def __init__(self, handler):
         self._handler = handler
         self._buffer = b''
+        self._read_event = asyncio.Event()
 
     def on_recv(self, buffer):
         self._buffer += buffer
+        self._read_event.set()
 
     async def read(self):
         while not self._buffer:
             if not self._handler:
                 raise utils.TunnelClosedError
-            await tornado.gen.sleep(0.005)
+            await self._read_event.wait()
+            self._read_event.clear()
         buffer = self._buffer
         self._buffer = b''
         return buffer
@@ -258,11 +263,11 @@ class WebSocketTunnelServer(server.TunnelServer):
                         self.set_status(403, 'Forbidden')
                     return False
                 self._downstream = WebSocketDownStream(self)
-                asyncio.ensure_future(
+                utils.AsyncTaskManager().start_task(
                     this.forward_data_to_upstream(self._tun_conn,
                                                   self._downstream,
                                                   self._tunnel_chain.tail))
-                asyncio.ensure_future(
+                utils.AsyncTaskManager().start_task(
                     this.forward_data_to_downstream(self._tun_conn,
                                                     self._downstream,
                                                     self._tunnel_chain.tail))

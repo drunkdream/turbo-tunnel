@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 '''HTTPS Tunnel
 '''
 
@@ -20,7 +19,6 @@ from . import utils
 class HTTPSTunnel(tunnel.TCPTunnel):
     '''HTTPS Tunnel
     '''
-
     @property
     def socket(self):
         return self._tunnel.socket
@@ -68,7 +66,6 @@ class DefaultHandler(tornado.web.RequestHandler):
 class HTTPRouter(tornado.routing.Router):
     '''Support CONNECT method
     '''
-
     def __init__(self, app, handlers=None):
         self._app = app
         self._handlers = handlers or []
@@ -95,7 +92,6 @@ class HTTPRouter(tornado.routing.Router):
 class HTTPSTunnelServer(server.TunnelServer):
     '''HTTPS Tunnel Server
     '''
-
     def post_init(self):
         this = self
 
@@ -108,7 +104,8 @@ class HTTPSTunnelServer(server.TunnelServer):
                 address = self.request.path.split(':')
                 address[1] = int(address[1])
                 address = tuple(address)
-                downstream = tunnel.TCPTunnel(self.request.connection.detach())
+                downstream = tunnel.TCPTunnel(self.request.connection.detach(),
+                                              server_side=True)
                 auth_data = this._listen_url.auth
                 if auth_data:
                     auth_data = auth_data.split(':')
@@ -158,15 +155,18 @@ class HTTPSTunnelServer(server.TunnelServer):
                                     b'HTTP/1.1 200 HTTPSTunnel Established\r\n\r\n'
                                 )
                                 tasks = [
-                                    this.forward_data_to_upstream(
-                                        tun_conn, downstream, tunnel_chain.tail),
-                                    this.forward_data_to_downstream(
-                                        tun_conn, downstream, tunnel_chain.tail)
+                                        this.forward_data_to_upstream(
+                                            tun_conn, downstream,
+                                            tunnel_chain.tail),
+                                        this.forward_data_to_downstream(
+                                            tun_conn, downstream,
+                                            tunnel_chain.tail)
                                 ]
-                                await asyncio.wait(tasks,
-                                                return_when=asyncio.FIRST_COMPLETED)
+                                await utils.AsyncTaskManager().wait_for_tasks(tasks)
                             else:
-                                utils.logger.warn('[%s] Downstream closed unexpectedly' % self.__class__.__name__)
+                                utils.logger.warn(
+                                    '[%s] Downstream closed unexpectedly' %
+                                    self.__class__.__name__)
                                 tun_conn.on_downstream_closed()
                         downstream.close()
                         self._finished = True

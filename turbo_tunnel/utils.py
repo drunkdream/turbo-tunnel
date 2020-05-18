@@ -2,6 +2,7 @@
 '''Miscellaneous utility functions and classes
 '''
 
+import asyncio
 import inspect
 import logging
 import socket
@@ -83,6 +84,64 @@ class Url(object):
     @path.setter
     def path(self, value):
         self._path = value
+
+
+class Singleton(object):
+    '''Singleton Decorator
+    '''
+    def __init__(self, cls):
+        self.__instance = None
+        self.__cls = cls
+
+    def __call__(self, *args, **kwargs):
+        if not self.__instance:
+            self.__instance = self.__cls(*args, **kwargs)
+        return self.__instance
+
+
+@Singleton
+class AsyncTaskManager(object):
+    def __init__(self):
+        self._async_tasks = []
+        self._sleep_task = None
+
+    @property
+    def running_tasks(self):
+        return self._async_tasks
+
+    async def wrap_task(self, task):
+        self._async_tasks.append(task)
+        logger.debug('[%s] Task %s start' % (self.__class__.__name__, task))
+        try:
+            await task
+        except GeneratorExit:
+            logger.warning('[%s] Task %s force stopped' %
+                           (self.__class__.__name__, task))
+        except:
+            logger.exception('[%s] Task %s crash' %
+                             (self.__class__.__name__, task))
+        else:
+            logger.debug('[%s] Task %s exit' % (self.__class__.__name__, task))
+        self._async_tasks.remove(task)
+
+    def start_task(self, task):
+        asyncio.ensure_future(self.wrap_task(task))
+
+    async def wait_for_tasks(self, tasks):
+        task_list = [self.wrap_task(task) for task in tasks]
+        await asyncio.wait(task_list, return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.sleep(0.1)
+        for i, task in enumerate(tasks):
+            if not task in self._async_tasks:
+                continue
+            task_list[i].close()
+
+    async def sleep(self):
+        if not self._sleep_task:
+            # Avoid too many sleep tasks
+            self._sleep_task = asyncio.sleep(0.001)
+        await self._sleep_task
+        self._sleep_task = None
 
 
 class IStream(object):

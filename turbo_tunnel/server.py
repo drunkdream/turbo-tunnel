@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 '''Tunnel Server
 '''
 
@@ -106,7 +105,6 @@ class TunnelServer(object):
 class TunnelConnection(object):
     '''Tunnel Connection
     '''
-
     def __init__(self, client_address, target_address):
         self._client_address = client_address
         self._target_address = target_address
@@ -177,7 +175,6 @@ class TunnelConnection(object):
 class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
     '''TCP Tunnel Server
     '''
-
     def post_init(self):
         tornado.tcpserver.TCPServer.__init__(self)
 
@@ -197,10 +194,12 @@ class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
                     return
 
                 tasks = [
-                    self.forward_data_to_upstream(tun_conn, downstream,
-                                                  tunnel_chain.tail),
-                    self.forward_data_to_downstream(tun_conn, downstream,
-                                                    tunnel_chain.tail)
+                    utils.AsyncTaskManager().wrap_task(
+                        self.forward_data_to_upstream(tun_conn, downstream,
+                                                      tunnel_chain.tail)),
+                    utils.AsyncTaskManager().wrap_task(
+                        self.forward_data_to_downstream(
+                            tun_conn, downstream, tunnel_chain.tail))
                 ]
                 await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 downstream.close()

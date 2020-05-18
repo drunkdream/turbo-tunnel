@@ -117,7 +117,7 @@ class TunnelConfiguration(object):
         self._last_modified = None
         self.load()
         if self._auto_reload:
-            asyncio.ensure_future(self.reload_task())
+            utils.AsyncTaskManager().start_task(self.reload_task())
 
     async def reload_task(self):
         while True:
