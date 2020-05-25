@@ -16,6 +16,7 @@ from . import utils
 class TunnelChain(object):
     '''Tunnel Chain
     '''
+
     def __init__(self, tunnel_router_or_urls, try_connect_count=1):
         self._tunnel_router = self._tunnel_urls = None
         if isinstance(tunnel_router_or_urls, route.TunnelRouter):
@@ -70,18 +71,20 @@ class TunnelChain(object):
 
     async def create_tunnel(self, address):
         if self._tunnel_router:
-            selected_tunnel = await self._tunnel_router.select(address)
-            if not selected_tunnel:
+            selected_rule, selected_tunnel = await self._tunnel_router.select(
+                address)
+            registry.plugin_registry.notify('on_channel_selected', address,
+                                            selected_rule, selected_tunnel)
+            if selected_rule == 'block':
                 utils.logger.warn(
-                    '[%s] No tunnel for %s:%d, maybe blocked' %
+                    '[%s] Address %s:%d is blocked' %
                     (self.__class__.__name__, address[0], address[1]))
-                raise utils.TunnelBlockedError('Address %s:%d is blocked' %
-                                               (address))
+                raise utils.TunnelBlockedError('%s:%d' % (address))
 
             self._tunnel_urls = selected_tunnel.urls
             utils.logger.info(
-                '[%s] Select tunnel %s to access %s:%d' %
-                (self.__class__.__name__, ', '.join(
+                '[%s] Select tunnel [%s] %s to access %s:%d' %
+                (self.__class__.__name__, selected_rule, ', '.join(
                     [str(url)
                      for url in self._tunnel_urls]), address[0], address[1]))
 

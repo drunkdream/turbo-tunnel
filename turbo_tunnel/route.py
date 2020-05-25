@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-
 '''Tunnel Route
 '''
+
 
 class TunnelRouter(object):
     '''Tunnel Router
@@ -20,15 +20,17 @@ class TunnelRouter(object):
             return self._conf.default_tunnel
         max_priority = -1
         tunnel = None
-        for rule in hit_rules:
-            if rule.priority > max_priority:
-                max_priority = rule.priority
-                tunnel = rule.tunnel
+        rule = None
+        for _rule in hit_rules:
+            if _rule.priority > max_priority:
+                max_priority = _rule.priority
+                tunnel = _rule.tunnel
+                rule = _rule.id
         if tunnel:
             tunnel = self._conf.get_tunnel(tunnel)
             if tunnel.is_blocked():
-                return None
+                return 'block', None
             else:
-                return tunnel
+                return rule, tunnel
         else:
-            return self._conf.default_tunnel
+            return 'default', self._conf.default_tunnel
