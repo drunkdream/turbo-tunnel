@@ -12,6 +12,10 @@ class Plugin(object):
     def on_unload(self):
         pass
 
+    def on_channel_selected(self, address, rule, channel):
+        pass
+
+
     def on_new_connection(self, connection):
         pass
 
