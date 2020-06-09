@@ -25,13 +25,22 @@ class SSHTunnel(tunnel.Tunnel):
     @classmethod
     def has_cache(cls, url):
         key = '%s:%d' % url.address
-        return key in cls.ssh_conns
+        if key in cls.ssh_conns:
+            conn = cls.ssh_conns[key]
+            if conn._transport.closed():
+                utils.logger.warn('[%s] SSH connection %s closed, remove cache' % (cls.__name__, key))
+                cls.ssh_conns.pop(key)
+                return False
+            return True
+        return False
 
     async def create_ssh_conn(self):
         key = '%s:%d' % (self._url.address)
         if key not in self.__class__.ssh_conns:
             loop = asyncio.get_event_loop()
-            options = {}
+            options = {
+                'known_hosts': None
+            }
             if self._url.auth:
                 username, password = self._url.auth.split(':', 1)
                 options['username'] = username
@@ -49,6 +58,11 @@ class SSHTunnel(tunnel.Tunnel):
             ssh_conn.connection_made(transport)
             try:
                 await ssh_conn.wait_established()
+            except asyncssh.misc.PermissionDenied as e:
+                utils.logger.error('[%s] Connect ssh server %s:%d auth failed: %s' % (self.__class__.__name__, self._url.host, self._url.port, e))
+                ssh_conn.abort()
+                await ssh_conn.wait_closed()
+                return None
             except Exception:
                 ssh_conn.abort()
                 await ssh_conn.wait_closed()
