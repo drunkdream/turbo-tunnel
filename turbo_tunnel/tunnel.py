@@ -44,6 +44,9 @@ class Tunnel(utils.IStream):
             return self._tunnel.socket
         return None
 
+    def closed(self):
+        return self._tunnel.closed()
+
     def on_read(self, buffer):
         utils.logger.debug('[%s] Recv %d bytes from upstream' %
                            (self.__class__.__name__, len(buffer)))
@@ -112,6 +115,14 @@ class TCPTunnel(Tunnel):
     @property
     def stream(self):
         return self._stream
+
+    def closed(self):
+        if self._stream:
+            return self._stream.closed()
+        elif self._tunnel:
+            return self._tunnel.closed()
+        else:
+            return True
 
     async def connect(self):
         if self._stream:
@@ -272,6 +283,9 @@ class TunnelTransport(asyncio.Transport):
 
     def abort(self):
         self._tunnel.close()
+
+    def closed(self):
+        return self._tunnel.closed()
 
     async def transfer_data_task(self):
         while True:

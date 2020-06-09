@@ -168,6 +168,11 @@ class IStream(object):
             '%s.%s' %
             (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
+    def closed(self):
+        raise NotImplementedError(
+            '%s.%s' %
+            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
     async def read(self):
         raise NotImplementedError(
             '%s.%s' %
