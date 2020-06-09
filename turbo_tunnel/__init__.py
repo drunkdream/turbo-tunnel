@@ -3,7 +3,7 @@
 '''Turbo tunnel
 '''
 
-VERSION = '0.4.2'
+VERSION = '0.4.3'
 
 import sys
 import traceback
