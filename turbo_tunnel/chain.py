@@ -125,7 +125,8 @@ class TunnelChain(object):
 
             time0 = time.time()
             if not await tunn.connect():
-                raise utils.TunnelConnectError('Connect %s failed' % tunn)
+                raise utils.TunnelConnectError('Create %s to %s:%d failed' %
+                                               (tunn, address[0], address[1]))
             utils.logger.debug('[%s][%.3f] Tunnel to %s established' %
                                (self.__class__.__name__,
                                 (time.time() - time0), url))
