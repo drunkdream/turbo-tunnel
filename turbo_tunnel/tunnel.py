@@ -148,6 +148,24 @@ class TCPTunnel(Tunnel):
         else:
             raise utils.TunnelClosedError(self)
 
+    async def read_until(self, delimiter, timeout=None):
+        if self._stream:
+            try:
+                if not timeout:
+                    buffer = await self._stream.read_until(delimiter)
+                else:
+                    buffer = await asyncio.wait_for(self._stream.read_until(delimiter), timeout)
+            except tornado.iostream.StreamClosedError:
+                pass
+            else:
+                if buffer:
+                    return buffer
+            raise utils.TunnelClosedError(self)
+        elif self._tunnel:
+            return await self._tunnel.read_until(delimiter, timeout)
+        else:
+            raise utils.TunnelClosedError(self)
+
     async def write(self, buffer):
         if self._stream:
             return await self._stream.write(buffer)
