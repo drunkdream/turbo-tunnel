@@ -30,6 +30,7 @@ class Url(object):
         if not self._host and self._port:
             self._host = '0.0.0.0'
         self._path = obj.path
+        self._query = obj.query
 
     def __str__(self):
         port = self.port or ''
@@ -84,6 +85,22 @@ class Url(object):
     @path.setter
     def path(self, value):
         self._path = value
+
+    @property
+    def params(self):
+        result = {}
+        if not self._query:
+            return result
+        items = self._query.split('&')
+        for item in items:
+            if '=' not in item:
+                continue
+            key, value = item.split('=', 1)
+            if key in result and not isinstance(result[key], list):
+                result[key] = [result[key]]
+            else:
+                result[key] = urllib.parse.unquote(value)
+        return result
 
 
 class Singleton(object):
@@ -174,6 +191,11 @@ class IStream(object):
             (self.__class__.__name__, inspect.currentframe().f_code.co_name))
 
     async def read(self):
+        raise NotImplementedError(
+            '%s.%s' %
+            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+
+    async def read_until(self, delimiter, timeout=None):
         raise NotImplementedError(
             '%s.%s' %
             (self.__class__.__name__, inspect.currentframe().f_code.co_name))
