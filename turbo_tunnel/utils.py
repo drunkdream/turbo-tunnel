@@ -3,7 +3,6 @@
 '''
 
 import asyncio
-import functools
 import inspect
 import logging
 import socket
