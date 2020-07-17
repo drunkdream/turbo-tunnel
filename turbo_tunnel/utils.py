@@ -106,6 +106,7 @@ class Url(object):
 class Singleton(object):
     '''Singleton Decorator
     '''
+
     def __init__(self, cls):
         self.__instance = None
         self.__cls = cls
@@ -128,30 +129,35 @@ class AsyncTaskManager(object):
 
     async def wrap_task(self, task):
         self._async_tasks.append(task)
-        logger.debug('[%s] Task %s start' % (self.__class__.__name__, task))
+        logger.debug('[%s] Task %s start' %
+                     (self.__class__.__name__, task.__name__))
         try:
             await task
-        except GeneratorExit:
+        except asyncio.CancelledError:
             logger.warning('[%s] Task %s force stopped' %
-                           (self.__class__.__name__, task))
+                           (self.__class__.__name__, task.__name__))
         except:
             logger.exception('[%s] Task %s crash' %
-                             (self.__class__.__name__, task))
+                             (self.__class__.__name__, task.__name__))
         else:
-            logger.debug('[%s] Task %s exit' % (self.__class__.__name__, task))
+            logger.debug('[%s] Task %s exit' %
+                         (self.__class__.__name__, task.__name__))
         self._async_tasks.remove(task)
 
     def start_task(self, task):
-        asyncio.ensure_future(self.wrap_task(task))
+        return asyncio.ensure_future(self.wrap_task(task))
 
     async def wait_for_tasks(self, tasks):
-        task_list = [self.wrap_task(task) for task in tasks]
+        task_list = [
+            asyncio.ensure_future(self.wrap_task(task)) for task in tasks
+        ]
         await asyncio.wait(task_list, return_when=asyncio.FIRST_COMPLETED)
-        await asyncio.sleep(0.1)
+        # await asyncio.sleep(0.1)
         for i, task in enumerate(tasks):
             if not task in self._async_tasks:
                 continue
-            task_list[i].close()
+            task_list[i].cancel()
+            await asyncio.sleep(0)  # Wait for task exit
 
     async def sleep(self):
         if not self._sleep_task:
