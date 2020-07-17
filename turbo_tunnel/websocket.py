@@ -187,6 +187,7 @@ class WebSocketDownStream(utils.IStream):
 
     def close(self):
         if self._handler:
+            self._read_event.set()
             self._handler.close()
             self._handler = None
 
@@ -294,6 +295,7 @@ class WebSocketTunnelServer(server.TunnelServer):
 
             def on_connection_close(self):
                 super(WebSocketProxyHandler, self).on_connection_close()
+                self._downstream.close()
                 self._tun_conn.on_downstream_closed()
                 self._tun_conn.on_close()
                 self._tun_conn = None
