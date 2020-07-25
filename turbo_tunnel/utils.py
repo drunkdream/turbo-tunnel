@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 import socket
+import time
 import urllib.parse
 
 import tornado.iostream
@@ -253,12 +254,28 @@ def is_ip_address(addr):
     return tornado.netutil.is_valid_ip(addr)
 
 
+resovle_timeout = 600
+resolve_cache = {}
+
 async def resolve_address(address):
     if not tornado.netutil.is_valid_ip(address[0]):
+        if address in resolve_cache and time.time() - resolve_cache[address]['time'] <= resovle_timeout:
+            return resolve_cache[address]['result']
         resovler = tornado.netutil.Resolver()
-        addr_list = await resovler.resolve(*address)
-        for it in addr_list:
-            if it[0] == socket.AddressFamily:
-                return it[1]
-
+        result = None, 0
+        try:
+            addr_list = await resovler.resolve(*address)
+        except socket.gaierror as e:
+            logger.warn('Resolve %s failed: %s' %
+                                  (address[0], e))
+        else:
+            for it in addr_list:
+                if it[0] == socket.AddressFamily:
+                    result = it[1]
+                    break
+        resolve_cache[address] = {
+            'time': time.time(),
+            'result': result
+        }
+        return result
     return address
