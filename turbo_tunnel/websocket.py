@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 '''WebSocket Tunnel
 '''
 
@@ -22,7 +21,6 @@ from . import utils
 class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
     '''WebSocket Client Support using exist connection 
     '''
-
     def __init__(self, tunnel, url, headers=None, timeout=15):
         self._tunnel = tunnel
         self._url = url
@@ -133,7 +131,6 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
 class WebSocketTunnel(tunnel.Tunnel):
     '''WebSocket Tunnel
     '''
-
     def __init__(self, tunnel, url, address):
         url = copy.copy(url)
         url.path = url.path.format(addr=address[0], port=address[1])
@@ -195,7 +192,6 @@ class WebSocketDownStream(utils.IStream):
 class WebSocketTunnelServer(server.TunnelServer):
     '''WebSocket Tunnel Server
     '''
-
     def post_init(self):
         this = self
 
@@ -208,7 +204,6 @@ class WebSocketTunnelServer(server.TunnelServer):
         class WebSocketProxyHandler(tornado.websocket.WebSocketHandler):
             '''WebSocket Proxy Handler
             '''
-
             def __init__(self, *args, **kwargs):
                 super(WebSocketProxyHandler, self).__init__(*args, **kwargs)
                 self._tun_conn = None
@@ -247,7 +242,8 @@ class WebSocketTunnelServer(server.TunnelServer):
                         return False
 
                 self._tun_conn = server.TunnelConnection(
-                    self.request.connection.context.address, address)
+                    self.request.connection.context.address, address,
+                    this.final_tunnel and this.final_tunnel.address)
                 self._tun_conn.on_open()
 
                 self._tunnel_chain = this.create_tunnel_chain()

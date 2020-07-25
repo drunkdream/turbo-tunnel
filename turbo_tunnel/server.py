@@ -52,6 +52,14 @@ class TunnelServer(object):
         self._running = True
         self.post_init()
 
+    @property
+    def final_tunnel(self):
+        for tunnel_url in self._tunnel_urls[::-1]:
+            if not tunnel_url.host or not tunnel_url.port:
+                continue
+            return tunnel_url
+        return None
+
     def post_init(self):
         pass
 
@@ -105,9 +113,10 @@ class TunnelServer(object):
 class TunnelConnection(object):
     '''Tunnel Connection
     '''
-    def __init__(self, client_address, target_address):
+    def __init__(self, client_address, target_address, tunnel_address=None):
         self._client_address = client_address
         self._target_address = target_address
+        self._tunnel_address = tunnel_address
         self._bytes_sent = 0
         self._bytes_received = 0
 
@@ -126,11 +135,22 @@ class TunnelConnection(object):
     def target_address(self):
         return self._target_address
 
+    @property
+    def tunnel_address(self):
+        return self._tunnel_address
+
+    def update_tunnel_address(self, tunnel_address):
+        self._tunnel_address = tunnel_address
+        registry.plugin_registry.notify('tunnel_address_updated', self,
+                                        tunnel_address)
+
     def on_open(self):
         message = '[%s] New connection from %s:%d' % (self.__class__.__name__,
                                                       self._client_address[0],
                                                       self._client_address[1])
         message += ', tunnel to %s:%d' % self._target_address
+        if self._tunnel_address:
+            message += ' through %s:%d' % self._tunnel_address
         utils.logger.info(message)
         registry.plugin_registry.notify('new_connection', self)
 
@@ -178,10 +198,19 @@ class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
     def post_init(self):
         tornado.tcpserver.TCPServer.__init__(self)
 
+    @property
+    def final_tunnel(self):
+        for tunnel_url in self._tunnel_urls[:-1][::-1]:
+            if not tunnel_url.host or not tunnel_url.port:
+                continue
+            return tunnel_url
+        return None
+
     async def handle_stream(self, stream, address):
         target_address = self._tunnel_urls[-1].host, self._tunnel_urls[-1].port
         downstream = tunnel.TCPTunnel(stream)
-        with TunnelConnection(address, target_address) as tun_conn:
+        with TunnelConnection(address, target_address, self.final_tunnel
+                              and self.final_tunnel.address) as tun_conn:
             with self.create_tunnel_chain() as tunnel_chain:
                 try:
                     await tunnel_chain.create_tunnel(target_address)
