@@ -13,7 +13,7 @@ from .util import DemoTCPServer
 @pytest.mark.asyncio
 async def test_tcp_tunnel():
     server = DemoTCPServer()
-    port = random.randint(1000, 65000)
+    port = random.randint(10000, 65000)
     server.listen(port)
     s = socket.socket()
     tunn = tunnel.TCPTunnel(s, address=('127.0.0.1', port))
