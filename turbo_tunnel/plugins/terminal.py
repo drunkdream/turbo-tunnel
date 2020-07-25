@@ -3,8 +3,9 @@
 '''
 
 import asyncio
-import time
+import logging
 import sys
+import time
 
 from . import Plugin
 from ..registry import plugin_registry
@@ -87,9 +88,10 @@ class TerminalTable(object):
 
 
 class Connection(object):
-    def __init__(self, src_addr, dst_addr):
+    def __init__(self, src_addr, dst_addr, tun_addr=None):
         self._src_addr = src_addr
         self._dst_addr = dst_addr
+        self._tun_addr = tun_addr
         self._start_time = time.time()
         self._end_time = None
         self._bytes_recv = 0
@@ -102,6 +104,10 @@ class Connection(object):
     @property
     def target_address(self):
         return self._dst_addr
+
+    @property
+    def tunnel_address(self):
+        return self._tun_addr
 
     @property
     def start_time(self):
@@ -129,6 +135,9 @@ class Connection(object):
     def bytes_recv(self):
         return self._bytes_recv
 
+    def on_tunnel_address_updated(self, tun_addr):
+        self._tun_addr = tun_addr
+
     def on_close(self):
         self._end_time = time.time()
 
@@ -141,7 +150,14 @@ class Connection(object):
 
 class RedirectedOutStream(object):
     def write(self, s):
-        pass
+        file_path = None
+        for handler in logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                file_path = handler.baseFilename
+                break
+        if file_path:
+            with open(file_path, 'a') as fp:
+                fp.write(s)
 
     def flush(self):
         pass
@@ -174,11 +190,15 @@ class TerminalPlugin(Plugin):
         origin_stdout, _ = self._patch_output()
         self._term_tab = TerminalTable(title, [{
             'title': 'Source Address',
-            'width': 20,
+            'width': 18,
             'align': 'left',
         }, {
+            'title': 'Tunnel Address',
+            'width': 22,
+            'align': 'left'
+        }, {
             'title': 'Target Address',
-            'width': 20,
+            'width': 22,
             'align': 'left'
         }, {
             'title': 'Start Time',
@@ -189,12 +209,12 @@ class TerminalPlugin(Plugin):
             'width': 10,
             'align': 'right'
         }, {
-            'title': 'Sent Bytes',
-            'width': 13,
+            'title': 'Bytes Out',
+            'width': 11,
             'align': 'right'
         }, {
-            'title': 'Recevied Bytes',
-            'width': 16,
+            'title': 'Bytes In',
+            'width': 11,
             'align': 'right'
         }], origin_stdout)
         self._conn_list = []
@@ -216,8 +236,15 @@ class TerminalPlugin(Plugin):
         return None
 
     def on_new_connection(self, connection):
-        conn = Connection(connection.client_address, connection.target_address)
+        conn = Connection(connection.client_address, connection.target_address,
+                          connection.tunnel_address)
         self._conn_list.append(conn)
+
+    def on_tunnel_address_updated(self, connection, tunnel_address):
+        conn = self._lookup_connection(connection.client_address,
+                                       connection.target_address)
+        if conn:
+            conn.on_tunnel_address_updated(tunnel_address)
 
     def on_data_recevied(self, connection, buffer):
         conn = self._lookup_connection(connection.client_address,
@@ -245,12 +272,16 @@ class TerminalPlugin(Plugin):
             if closed_conns:
                 for conn in closed_conns:
                     closed_conns.remove(conn)
-                    self._conn_list.remove(conn)
-                    prev_conns.remove(conn)
+                    if conn in self._conn_list:
+                        self._conn_list.remove(conn)
+                    if conn in prev_conns:
+                        prev_conns.remove(conn)
 
             for conn in self._conn_list:
                 data = [
                     '%s:%d' % conn.client_address,
+                    ('%s:%d' %
+                     conn.tunnel_address) if conn.tunnel_address else '--',
                     '%s:%d' % conn.target_address, conn.start_time,
                     conn.duration, conn.bytes_sent, conn.bytes_recv
                 ]

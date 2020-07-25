@@ -43,6 +43,10 @@ class TunnelChain(object):
         else:
             return None
 
+    @property
+    def tunnel_urls(self):
+        return self._tunnel_urls
+
     def _retry(self, func):
         async def func_wrapper(*args, **kwargs):
             for i in range(self._try_connect_count):
@@ -73,7 +77,7 @@ class TunnelChain(object):
         if self._tunnel_router:
             selected_rule, selected_tunnel = await self._tunnel_router.select(
                 address)
-            registry.plugin_registry.notify('on_channel_selected', address,
+            registry.plugin_registry.notify('tunnel_selected', address,
                                             selected_rule, selected_tunnel)
             if selected_rule == 'block':
                 utils.logger.warn(

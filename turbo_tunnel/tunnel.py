@@ -44,6 +44,10 @@ class Tunnel(utils.IStream):
             return self._tunnel.socket
         return None
 
+    @property
+    def url(self):
+        return self._url
+
     def closed(self):
         return self._tunnel.closed()
 

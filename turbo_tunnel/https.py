@@ -125,9 +125,11 @@ class HTTPSTunnelServer(server.TunnelServer):
                             b'HTTP/1.1 403 Forbidden\r\n\r\n')
                         self._finished = True
                         return
+
                 with server.TunnelConnection(
-                        self.request.connection.context.address,
-                        address) as tun_conn:
+                        self.request.connection.context.address, address,
+                        this.final_tunnel
+                        and this.final_tunnel.address) as tun_conn:
                     with this.create_tunnel_chain() as tunnel_chain:
                         try:
                             await tunnel_chain.create_tunnel(address)
@@ -150,19 +152,25 @@ class HTTPSTunnelServer(server.TunnelServer):
                             self._finished = True
                             return
                         else:
+                            if tunnel_chain.tunnel_urls:
+                                tunnel_url = tunnel_chain.tunnel_urls[-1]
+                                tun_conn.update_tunnel_address(
+                                    (tunnel_url.host, tunnel_url.port))
+
                             if not downstream.closed():
                                 await downstream.write(
                                     b'HTTP/1.1 200 HTTPSTunnel Established\r\n\r\n'
                                 )
                                 tasks = [
-                                        this.forward_data_to_upstream(
-                                            tun_conn, downstream,
-                                            tunnel_chain.tail),
-                                        this.forward_data_to_downstream(
-                                            tun_conn, downstream,
-                                            tunnel_chain.tail)
+                                    this.forward_data_to_upstream(
+                                        tun_conn, downstream,
+                                        tunnel_chain.tail),
+                                    this.forward_data_to_downstream(
+                                        tun_conn, downstream,
+                                        tunnel_chain.tail)
                                 ]
-                                await utils.AsyncTaskManager().wait_for_tasks(tasks)
+                                await utils.AsyncTaskManager().wait_for_tasks(
+                                    tasks)
                             else:
                                 utils.logger.warn(
                                     '[%s] Downstream closed unexpectedly' %

@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
-
 '''Internal plugins
 '''
 
 
 class Plugin(object):
-
     def on_load(self):
         pass
 
     def on_unload(self):
         pass
 
-    def on_channel_selected(self, address, rule, channel):
+    def on_tunnel_selected(self, address, rule, tunnel):
         pass
 
-
     def on_new_connection(self, connection):
+        pass
+
+    def on_tunnel_address_updated(self, connection, tunnel_address):
         pass
 
     def on_data_recevied(self, connection, buffer):

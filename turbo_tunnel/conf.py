@@ -5,6 +5,7 @@
 import asyncio
 import fnmatch
 import os
+import socket
 
 import yaml
 
@@ -65,6 +66,9 @@ class TunnelRule(object):
         self._port_list = self._port_list.split(';')
         self._tunnel = rule['tunnel']
 
+    def __str__(self):
+        return '<TunnelRule object id=%s priority=%d at 0x%x>' % (self._id, self._priority, id(self))
+
     @property
     def id(self):
         return self._id
@@ -79,15 +83,20 @@ class TunnelRule(object):
 
     async def is_hit(self, address):
         host, port = address
-        addr = None
-        if not utils.is_ip_address(host):
-            addr, port = await utils.resolve_address(address)
+        host_match = False
         for tmpl in self._addr_list:
             if fnmatch.fnmatch(host, tmpl.strip()):
+                host_match = True
                 break
-            if addr and fnmatch.fnmatch(addr, tmpl.strip()):
-                break
-        else:
+
+        if not host_match and not utils.is_ip_address(host):
+            addr, port = await utils.resolve_address(address)
+            if addr:
+                for tmpl in self._addr_list:
+                    if fnmatch.fnmatch(addr, tmpl.strip()):
+                        host_match = True
+                        break
+        if not host_match:
             return False
 
         for port_str in self._port_list:
@@ -171,7 +180,9 @@ class TunnelConfiguration(object):
 
     @property
     def rules(self):
-        return self._rules
+        rules = self._rules[:]
+        rules.sort(key=lambda it: it.priority, reverse=True)
+        return rules
 
     @property
     def default_tunnel(self):
