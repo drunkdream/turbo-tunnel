@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from turbo_tunnel import conf
+from .util import conf_yaml
 
 
 def test_tunnel():
@@ -46,3 +47,14 @@ async def test_tunnel_rule():
         assert await rule.is_hit(('www.qq.com', 5566)) == True
         assert await rule.is_hit(('www.qq.com', 5567)) == False
         assert await rule.is_hit(('wwww.qq.com', 5555)) == False
+
+
+def test_conf_yaml():
+    conf_file = 'conf.yml'
+    with open(conf_file, 'w')as fp:
+        fp.write(conf_yaml)
+    config = conf.TunnelConfiguration(conf_file)
+    rules = config.rules
+    assert(rules[0].id == 'local')
+    assert(rules[1].id == 'lan')
+    assert(rules[2].id == 'wan')

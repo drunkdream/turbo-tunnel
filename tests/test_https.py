@@ -16,7 +16,7 @@ from turbo_tunnel import utils
 from .util import DemoTCPServer
 
 
-@pytest.mark.asyncio
+#@pytest.mark.asyncio
 async def test_https_tunnel_server():
     port1 = random.randint(1000, 65000)
     listen_url = 'http://127.0.0.1:%d' % port1
