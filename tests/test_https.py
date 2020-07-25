@@ -18,13 +18,13 @@ from .util import DemoTCPServer
 
 #@pytest.mark.asyncio
 async def test_https_tunnel_server():
-    port1 = random.randint(1000, 65000)
+    port1 = random.randint(10000, 65000)
     listen_url = 'http://127.0.0.1:%d' % port1
     server1 = https.HTTPSTunnelServer(listen_url, ['tcp://'])
     server1.start()
 
     server2 = DemoTCPServer()
-    port2 = random.randint(1000, 65000)
+    port2 = random.randint(10000, 65000)
     server2.listen(port2)
 
     s = socket.socket()
@@ -50,13 +50,13 @@ async def test_https_tunnel_server():
 
 @pytest.mark.asyncio
 async def test_https_tunnel_server_auto_close():
-    port1 = random.randint(1000, 65000)
+    port1 = random.randint(10000, 65000)
     listen_url = 'http://127.0.0.1:%d' % port1
     server1 = https.HTTPSTunnelServer(listen_url, ['tcp://'])
     server1.start()
 
     server2 = DemoTCPServer()
-    port2 = random.randint(1000, 65000)
+    port2 = random.randint(10000, 65000)
     server2.listen(port2)
 
     s = socket.socket()
