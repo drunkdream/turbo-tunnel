@@ -28,8 +28,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip pytest pytest-tornasync
+          python -m pip install --upgrade pip pytest pytest-cov pytest-tornasync codecov
           pip install -r requirements.txt
       - name: Run Tests
         run: |
-          python -c "import sys;exit(0) if sys.platform=='win32' and sys.version_info[1] >= 8 else exit(-1) " || pytest
+          python -c "import sys;exit(0) if sys.platform=='win32' and sys.version_info[1] >= 8 else exit(-1) " || pytest --cov=.
+      - name: Upload coverage reports to Codecov
+        run: |
+          codecov
+        env: # Or as an environment variable
+          super_secret: ${{ secrets.CODECOV_TOKEN }}

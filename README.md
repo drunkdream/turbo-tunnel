@@ -9,6 +9,7 @@
 
 [![PyPi version](https://img.shields.io/pypi/v/turbo-tunnel.svg)](https://pypi.python.org/pypi/turbo-tunnel/) 
 ![Unittest](https://github.com/drunkdream/turbo-tunnel/workflows/Unittest/badge.svg)
+[![codecov.io](https://codecov.io/github/drunkdream/turbo-tunnel/coverage.svg?branch=master)](https://codecov.io/github/drunkdream/turbo-tunnel)
 
 ## 环境要求
 
