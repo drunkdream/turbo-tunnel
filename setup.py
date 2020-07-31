@@ -13,6 +13,15 @@ with open('requirements.txt') as fp:
     REQUIREMENTS = text.split('\n')
 
 
+def find_packages():
+    packages = []
+    for pkg in setuptools.find_packages():
+        if not pkg.startswith('test'):
+            print(pkg)
+            packages.append(pkg)
+    return packages
+
+
 setuptools.setup(
     author="drunkdream",
     author_email="drunkdream@qq.com",
@@ -23,7 +32,7 @@ setuptools.setup(
     long_description=README,
     long_description_content_type="text/markdown",
     url='https://github.com/drunkdream/turbo-tunnel',
-    packages=setuptools.find_packages(),
+    packages=find_packages(),
     python_requires=">=3.5",
     install_requires=REQUIREMENTS,
     classifiers=[
