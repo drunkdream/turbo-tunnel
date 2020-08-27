@@ -3,6 +3,7 @@
 '''
 
 import asyncio
+import os
 
 import asyncssh
 
@@ -45,6 +46,14 @@ class SSHTunnel(tunnel.Tunnel):
                 'host': self._url.host,
                 'port': self._url.port
             }
+            private_key_path = self._url.params.get('private_key')
+            if private_key_path:
+                if not os.path.isfile(private_key_path):
+                    utils.logger.error(
+                        '[%s] Private key file %s not found' %
+                        (self.__class__.__name__, private_key_path))
+                    return None
+                options['client_keys'] = [private_key_path]
             if self._url.auth:
                 password = None
                 if ':' in self._url.auth:
@@ -53,8 +62,18 @@ class SSHTunnel(tunnel.Tunnel):
                     username = self._url.auth
                 options['username'] = username
                 if password:
-                    options['password'] = password
-            options = asyncssh.SSHClientConnectionOptions(**options)
+                    if private_key_path:
+                        options['passphrase'] = password
+                    else:
+                        options['password'] = password
+            try:
+                options = asyncssh.SSHClientConnectionOptions(**options)
+            except (asyncssh.KeyImportError, asyncssh.KeyEncryptionError) as e:
+                utils.logger.error(
+                    '[%s] Import private key %s failed: %s' %
+                    (self.__class__.__name__, private_key_path, e))
+                return None
+
             utils.logger.info(
                 '[%s] Create connection to ssh server %s:%d' %
                 (self.__class__.__name__, self._url.host, self._url.port))
