@@ -13,6 +13,13 @@ with open('requirements.txt') as fp:
     REQUIREMENTS = text.split('\n')
 
 
+with open('extra_requirements.txt') as fp:
+    EXTRA_REQUIREMENTS = {}
+    for line in fp.readlines():
+        key, value = line.strip().split('=', 1)
+        EXTRA_REQUIREMENTS[key] = value.split(',')
+
+
 def find_packages():
     packages = []
     for pkg in setuptools.find_packages():
@@ -35,6 +42,7 @@ setuptools.setup(
     packages=find_packages(),
     python_requires=">=3.5",
     install_requires=REQUIREMENTS,
+    extras_require=EXTRA_REQUIREMENTS,
     classifiers=[
         # Trove classifiers
         # (https://pypi.python.org/pypi?%3Aaction=list_classifiers)
