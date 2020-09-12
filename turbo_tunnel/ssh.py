@@ -56,13 +56,10 @@ class MicroSSHServer(asyncssh.SSHServer):
     async def connection_requested(self, dest_host, dest_port, orig_host, orig_port):
         return await self._conn.forward_connection(dest_host, dest_port)
 
-    async def handle_process(self, process):
-        username = process.get_extra_info("username")
-        interactive = process.get_terminal_type() is not None
-
+    async def _create_process(self, interactive, command, size):
         if not interactive:
             proc = await asyncio.create_subprocess_shell(
-                process.command,
+                command,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -72,16 +69,14 @@ class MicroSSHServer(asyncssh.SSHServer):
             stdout = proc.stdout
             stderr = proc.stderr
         else:
-            width, height, _, _ = process.get_terminal_size()
-            process.stdout.write(self.welcome)
             if sys.platform == "win32":
                 cmd = (
                     "conhost.exe",
                     "--headless",
                     "--width",
-                    str(width),
+                    str(size[0]),
                     "--height",
-                    str(height),
+                    str(size[1]),
                     "--",
                     "cmd.exe",
                 )
@@ -122,6 +117,25 @@ class MicroSSHServer(asyncssh.SSHServer):
                 stdin = utils.AsyncFileDescriptor(mi)
                 stdout = utils.AsyncFileDescriptor(mo)
                 stderr = utils.AsyncFileDescriptor(me)
+        return proc, stdin, stdout, stderr
+
+    async def _handle_process(self, process):
+        username = process.get_extra_info("username")
+        interactive = process.get_terminal_type() is not None
+        utils.logger.info(
+            "[%s] Create %sprocess %s"
+            % (
+                self.__class__.__name__,
+                "interactive " if interactive else "",
+                process.command if not interactive else "",
+            )
+        )
+        width, height, _, _ = process.get_terminal_size()
+        proc, stdin, stdout, stderr = await self._create_process(
+            interactive, process.command, (width, height)
+        )
+        if interactive:
+            process.stdout.write(self.welcome)
 
         tasks = [None, None, None]
 
@@ -144,8 +158,7 @@ class MicroSSHServer(asyncssh.SSHServer):
                 try:
                     buffer = task.result()
                 except asyncssh.BreakReceived:
-                    process.exit(-1)
-                    return
+                    return -1
                 except asyncssh.TerminalSizeChanged as e:
                     # TODO
                     break
@@ -157,8 +170,8 @@ class MicroSSHServer(asyncssh.SSHServer):
                         buffer = buffer.decode("gbk")
 
                 if not buffer:
-                    process.exit(-1)
-                    return
+                    return -1
+
                 if index == 0:
                     if buffer.endswith("\r"):
                         buffer += "\n"
@@ -169,25 +182,58 @@ class MicroSSHServer(asyncssh.SSHServer):
                 else:
                     buffer = buffer.replace("\r\n", "\r").replace("\r", "\r\n")
                     process.stderr.write(buffer)
-        process.exit(proc.returncode)
+
+        return proc.returncode
+
+    async def handle_process(self, process):
+        try:
+            process.exit(await self._handle_process(process))
+        except Exception as e:
+            utils.logger.exception(
+                "[%s] Create process %s failed"
+                % (self.__class__.__name__, process.command)
+            )
+            message = (e.args and e.args[0]) or e.__class__.__name__
+            process.stderr.write('Error: %s' % message)
+            process.exit(-1)
 
     async def start(self):
-        self._conn = await asyncssh.create_server(
-            lambda: MicroSSHServer(
-                self._listen_address,
-                self._server_host_keys,
-                self._username,
-                self._password,
-                self._public_key,
-            ),
-            self._listen_address[0],
-            self._listen_address[1],
-            server_host_keys=self._server_host_keys,
-            process_factory=lambda process: asyncio.ensure_future(
-                self.handle_process(process)
-            ),
-            line_editor=False,
-        )
+        try:
+            self._conn = await asyncssh.create_server(
+                lambda: MicroSSHServer(
+                    self._listen_address,
+                    self._server_host_keys,
+                    self._username,
+                    self._password,
+                    self._public_key,
+                ),
+                self._listen_address[0],
+                self._listen_address[1],
+                server_host_keys=self._server_host_keys,
+                process_factory=lambda process: asyncio.ensure_future(
+                    self.handle_process(process)
+                ),
+                line_editor=False,
+            )
+        except OSError as e:
+            utils.logger.error(
+                "[%s] SSH server listen on %s:%d failed: %s"
+                % (
+                    self.__class__.__name__,
+                    self._listen_url.host,
+                    self._listen_url.port,
+                    e,
+                )
+            )
+        else:
+            utils.logger.info(
+                "[%s] SSH server is listening on %s:%d"
+                % (
+                    self.__class__.__name__,
+                    self._listen_url.host,
+                    self._listen_url.port,
+                )
+            )
 
     def close(self):
         if self._conn:
@@ -226,10 +272,6 @@ class SSHTunnelServer(server.TunnelServer, MicroSSHServer):
 
     def start(self):
         asyncio.ensure_future(MicroSSHServer.start(self))
-        utils.logger.info(
-            "[%s] SSH server is listening on %s:%d"
-            % (self.__class__.__name__, self._listen_url.host, self._listen_url.port)
-        )
 
 
 class SSHTunnel(tunnel.Tunnel):
