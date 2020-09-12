@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-'''Miscellaneous utility functions and classes
-'''
+"""Miscellaneous utility functions and classes
+"""
 
 import asyncio
 import inspect
 import logging
+import os
 import socket
 import time
 import urllib.parse
@@ -12,7 +13,7 @@ import urllib.parse
 import tornado.iostream
 import tornado.netutil
 
-logger = logging.getLogger('turbo-tunnel')
+logger = logging.getLogger("turbo-tunnel")
 
 
 class Url(object):
@@ -21,36 +22,41 @@ class Url(object):
         obj = urllib.parse.urlparse(url)
         self._protocol = obj.scheme
         netloc = obj.netloc
-        auth = ''
+        auth = ""
         port = 0
-        if '@' in netloc:
-            auth, netloc = netloc.split('@')
-        if ':' in netloc:
-            netloc, port = netloc.split(':')
+        if "@" in netloc:
+            auth, netloc = netloc.split("@")
+        if ":" in netloc:
+            netloc, port = netloc.split(":")
         self._auth, self._host, self._port = auth, netloc, int(port)
         if not self._host and self._port:
-            self._host = '0.0.0.0'
+            self._host = "0.0.0.0"
         self._path = obj.path
         self._query = obj.query
 
     def __str__(self):
-        port = self.port or ''
-        if self._protocol in ('http', 'ws') and port == 80:
-            port = ''
-        elif self._protocol in ('https', 'wss') and port == 443:
-            port = ''
-        elif self._protocol in ('ssh', ) and port == 22:
-            port = ''
+        port = self.port or ""
+        if self._protocol in ("http", "ws") and port == 80:
+            port = ""
+        elif self._protocol in ("https", "wss") and port == 443:
+            port = ""
+        elif self._protocol in ("ssh",) and port == 22:
+            port = ""
         elif port:
-            port = ':%d' % port
-        return '%s://%s%s%s' % (self._protocol, self._host, port, self._path)
+            port = ":%d" % port
+        return "%s://%s%s%s" % (self._protocol, self._host, port, self._path)
 
     def __eq__(self, other):
         if not other:
             return False
         if not isinstance(other, Url):
             other = Url(other)
-        return self.protocol == other.protocol and self.host == other.host and self.port == other.port and self.path == other.path
+        return (
+            self.protocol == other.protocol
+            and self.host == other.host
+            and self.port == other.port
+            and self.path == other.path
+        )
 
     @property
     def protocol(self):
@@ -64,11 +70,11 @@ class Url(object):
     def port(self):
         if self._port:
             return self._port
-        if self.protocol in ('http', 'ws'):
+        if self.protocol in ("http", "ws"):
             return 80
-        elif self.protocol in ('https', 'wss'):
+        elif self.protocol in ("https", "wss"):
             return 443
-        elif self.protocol in ('ssh', ):
+        elif self.protocol in ("ssh",):
             return 22
 
     @property
@@ -92,11 +98,11 @@ class Url(object):
         result = {}
         if not self._query:
             return result
-        items = self._query.split('&')
+        items = self._query.split("&")
         for item in items:
-            if '=' not in item:
+            if "=" not in item:
                 continue
-            key, value = item.split('=', 1)
+            key, value = item.split("=", 1)
             if key in result and not isinstance(result[key], list):
                 result[key] = [result[key]]
             else:
@@ -105,8 +111,7 @@ class Url(object):
 
 
 class Singleton(object):
-    '''Singleton Decorator
-    '''
+    """Singleton Decorator"""
 
     def __init__(self, cls):
         self.__instance = None
@@ -130,28 +135,26 @@ class AsyncTaskManager(object):
 
     async def wrap_task(self, task):
         self._async_tasks.append(task)
-        logger.debug('[%s] Task %s start' %
-                     (self.__class__.__name__, task.__name__))
+        logger.debug("[%s] Task %s start" % (self.__class__.__name__, task.__name__))
         try:
             await task
         except asyncio.CancelledError:
-            logger.warning('[%s] Task %s force stopped' %
-                           (self.__class__.__name__, task.__name__))
+            logger.warning(
+                "[%s] Task %s force stopped" % (self.__class__.__name__, task.__name__)
+            )
         except:
-            logger.exception('[%s] Task %s crash' %
-                             (self.__class__.__name__, task.__name__))
+            logger.exception(
+                "[%s] Task %s crash" % (self.__class__.__name__, task.__name__)
+            )
         else:
-            logger.debug('[%s] Task %s exit' %
-                         (self.__class__.__name__, task.__name__))
+            logger.debug("[%s] Task %s exit" % (self.__class__.__name__, task.__name__))
         self._async_tasks.remove(task)
 
     def start_task(self, task):
         return asyncio.ensure_future(self.wrap_task(task))
 
     async def wait_for_tasks(self, tasks):
-        task_list = [
-            asyncio.ensure_future(self.wrap_task(task)) for task in tasks
-        ]
+        task_list = [asyncio.ensure_future(self.wrap_task(task)) for task in tasks]
         await asyncio.wait(task_list, return_when=asyncio.FIRST_COMPLETED)
         # await asyncio.sleep(0.1)
         for i, task in enumerate(tasks):
@@ -172,50 +175,50 @@ class IStream(object):
     @property
     def socket(self):
         raise NotImplementedError(
-            '%s.%s' %
-            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
 
     @property
     def stream(self):
         raise NotImplementedError(
-            '%s.%s' %
-            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
 
     @property
     def target_address(self):
         raise NotImplementedError(
-            '%s.%s' %
-            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
 
     async def connect(self):
         raise NotImplementedError(
-            '%s.%s' %
-            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
 
     def closed(self):
         raise NotImplementedError(
-            '%s.%s' %
-            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
 
     async def read(self):
         raise NotImplementedError(
-            '%s.%s' %
-            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
 
     async def read_until(self, delimiter, timeout=None):
         raise NotImplementedError(
-            '%s.%s' %
-            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
 
     async def write(self, buffer):
         raise NotImplementedError(
-            '%s.%s' %
-            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
 
     def close(self):
         raise NotImplementedError(
-            '%s.%s' %
-            (self.__class__.__name__, inspect.currentframe().f_code.co_name))
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
 
 
 class ConfigError(RuntimeError):
@@ -250,6 +253,49 @@ class ParamError(RuntimeError):
     pass
 
 
+class AsyncFileDescriptor(object):
+    """Async File Descriptor"""
+    def __init__(self, fd):
+        self._loop = asyncio.get_event_loop()
+        self._fd = fd
+        self._event = asyncio.Event()
+        self._buffer = b""
+        self._loop.add_reader(self._fd, self.read_callback)
+        self._closed = False
+
+    def close(self):
+        self._loop.remove_reader(self._fd)
+
+    async def read(self, bytes=4096):
+        await self._event.wait()
+        self._event.clear()
+        buffer = self._buffer
+        self._buffer = b""
+        return buffer
+
+    def write(self, buffer):
+        os.write(self._fd, buffer)
+
+    def read_callback(self, *args):
+        try:
+            buffer = os.read(self._fd, 4096)
+        except OSError:
+            self.close()
+            self._closed = True
+            self._event.set()
+            return
+
+        self._buffer += buffer
+        self._event.set()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, exc_trackback):
+        self.close()
+        self._closed = True
+
+
 def is_ip_address(addr):
     return tornado.netutil.is_valid_ip(addr)
 
@@ -257,25 +303,25 @@ def is_ip_address(addr):
 resovle_timeout = 600
 resolve_cache = {}
 
+
 async def resolve_address(address):
     if not tornado.netutil.is_valid_ip(address[0]):
-        if address in resolve_cache and time.time() - resolve_cache[address]['time'] <= resovle_timeout:
-            return resolve_cache[address]['result']
+        if (
+            address in resolve_cache
+            and time.time() - resolve_cache[address]["time"] <= resovle_timeout
+        ):
+            return resolve_cache[address]["result"]
         resovler = tornado.netutil.Resolver()
         result = None, 0
         try:
             addr_list = await resovler.resolve(*address)
         except socket.gaierror as e:
-            logger.warn('Resolve %s failed: %s' %
-                                  (address[0], e))
+            logger.warn("Resolve %s failed: %s" % (address[0], e))
         else:
             for it in addr_list:
                 if it[0] == socket.AddressFamily:
                     result = it[1]
                     break
-        resolve_cache[address] = {
-            'time': time.time(),
-            'result': result
-        }
+        resolve_cache[address] = {"time": time.time(), "result": result}
         return result
     return address
