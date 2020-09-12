@@ -4,8 +4,8 @@ import setuptools
 
 import turbo_tunnel
 
-with open('README.md') as fp:
-    README = fp.read()
+with open('README.md', 'rb') as fp:
+    README = fp.read().decode()
 
 
 with open('requirements.txt') as fp:
