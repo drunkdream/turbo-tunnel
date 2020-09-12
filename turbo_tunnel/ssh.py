@@ -194,7 +194,7 @@ class MicroSSHServer(asyncssh.SSHServer):
                 % (self.__class__.__name__, process.command)
             )
             message = (e.args and e.args[0]) or e.__class__.__name__
-            process.stderr.write('Error: %s' % message)
+            process.stderr.write("Error: %s" % message)
             process.exit(-1)
 
     async def start(self):
@@ -220,8 +220,8 @@ class MicroSSHServer(asyncssh.SSHServer):
                 "[%s] SSH server listen on %s:%d failed: %s"
                 % (
                     self.__class__.__name__,
-                    self._listen_url.host,
-                    self._listen_url.port,
+                    self._listen_address[0],
+                    self._listen_address[1],
                     e,
                 )
             )
@@ -230,8 +230,8 @@ class MicroSSHServer(asyncssh.SSHServer):
                 "[%s] SSH server is listening on %s:%d"
                 % (
                     self.__class__.__name__,
-                    self._listen_url.host,
-                    self._listen_url.port,
+                    self._listen_address[0],
+                    self._listen_address[1],
                 )
             )
 
