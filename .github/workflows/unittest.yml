@@ -32,7 +32,7 @@ jobs:
           pip install -r requirements.txt
       - name: Run Tests
         run: |
-          python -c "import sys;exit(0) if sys.platform=='win32' and sys.version_info[1] >= 8 else exit(-1) " || pytest --cov=.
+          python -c "import sys;exit(0) if sys.platform=='win32' and (sys.version_info[1] >= 8 or sys.version_info[1] <= 5) else exit(-1) " || pytest --cov=.
       - name: Upload coverage reports to Codecov
         run: |
           codecov -t ${{ secrets.CODECOV_TOKEN }}
