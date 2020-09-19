@@ -3,6 +3,7 @@
 """
 
 import asyncio
+import shlex
 import os
 import socket
 import sys
@@ -78,7 +79,7 @@ class MicroSSHServer(asyncssh.SSHServer):
                     "--height",
                     str(size[1]),
                     "--",
-                    "cmd.exe",
+                    command or "cmd.exe",
                 )
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -93,30 +94,28 @@ class MicroSSHServer(asyncssh.SSHServer):
             else:
                 import pty
 
-                cmd = (os.environ.get("SHELL", "sh"), "--norc", "--noprofile", "-i")
-                # cmd = ('python', '-c', "import os, pty;pty.spawn((os.environ.get('SHELL', 'sh'), '-i'))")
-                mi, si = pty.openpty()
-                mo, so = pty.openpty()
-                me, se = pty.openpty()
+                cmdline = list(shlex.split(command or os.environ.get("SHELL", "sh")))
+                exe = cmdline[0]
+                if exe[0] != "/":
+                    for it in os.environ["PATH"].split(":"):
+                        path = os.path.join(it, exe)
+                        if os.path.isfile(path):
+                            exe = path
+                            break
 
-                def preexec():
-                    os.setsid()
-
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdin=si,
-                    stdout=so,
-                    stderr=se,
-                    preexec_fn=preexec,
-                    close_fds=True
-                )
-
-                os.close(si)
-                os.close(so)
-                os.close(se)
-                stdin = utils.AsyncFileDescriptor(mi)
-                stdout = utils.AsyncFileDescriptor(mo)
-                stderr = utils.AsyncFileDescriptor(me)
+                pid, fd = pty.fork()
+                if pid == 0:
+                    # child process
+                    sys.stdout.flush()
+                    try:
+                        os.execve(exe, cmdline, os.environ)
+                    except Exception as e:
+                        sys.stderr.write(str(e))
+                else:
+                    proc = utils.Process(pid)
+                    stdin = utils.AsyncFileDescriptor(fd)
+                    stdout = utils.AsyncFileDescriptor(fd)
+                    stderr = None
         return proc, stdin, stdout, stderr
 
     async def _handle_process(self, process):
@@ -127,7 +126,7 @@ class MicroSSHServer(asyncssh.SSHServer):
             % (
                 self.__class__.__name__,
                 "interactive " if interactive else "",
-                process.command if not interactive else "",
+                process.command or "",
             )
         )
         width, height, _, _ = process.get_terminal_size()
@@ -137,17 +136,19 @@ class MicroSSHServer(asyncssh.SSHServer):
         if interactive:
             process.stdout.write(self.welcome)
 
-        tasks = [None, None, None]
+        tasks = [None, None]
+        if stderr:
+            tasks.append(None)
 
         while proc.returncode is None:
             if tasks[0] is None:
-                tasks[0] = asyncio.ensure_future(process.stdin.read(4096))
+                tasks[0] = utils.safe_ensure_future(process.stdin.read(4096))
             if tasks[1] is None:
-                tasks[1] = asyncio.ensure_future(stdout.read(4096))
-            if tasks[2] is None:
-                tasks[2] = asyncio.ensure_future(stderr.read(4096))
+                tasks[1] = utils.safe_ensure_future(stdout.read(4096))
+            if stderr and tasks[2] is None:
+                tasks[2] = utils.safe_ensure_future(stderr.read(4096))
 
-            done_tasks, pending_tasks = await asyncio.wait(
+            done_tasks, _ = await asyncio.wait(
                 tasks, return_when=asyncio.FIRST_COMPLETED
             )
 
@@ -159,9 +160,9 @@ class MicroSSHServer(asyncssh.SSHServer):
                     buffer = task.result()
                 except asyncssh.BreakReceived:
                     return -1
-                except asyncssh.TerminalSizeChanged as e:
+                except asyncssh.TerminalSizeChanged:
                     # TODO
-                    break
+                    continue
 
                 if isinstance(buffer, bytes):
                     try:
@@ -173,8 +174,9 @@ class MicroSSHServer(asyncssh.SSHServer):
                     return -1
 
                 if index == 0:
-                    if buffer.endswith("\r"):
+                    if buffer.endswith("\r") and sys.platform == "win32":
                         buffer += "\n"
+
                     buffer = buffer.encode()
                     stdin.write(buffer)
                 elif index == 1:
