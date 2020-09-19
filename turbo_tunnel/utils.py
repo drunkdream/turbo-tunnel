@@ -154,6 +154,7 @@ class AsyncTaskManager(object):
         return asyncio.ensure_future(self.wrap_task(task))
 
     async def wait_for_tasks(self, tasks):
+        """wait until one task complete"""
         task_list = [asyncio.ensure_future(self.wrap_task(task)) for task in tasks]
         await asyncio.wait(task_list, return_when=asyncio.FIRST_COMPLETED)
         # await asyncio.sleep(0.1)
@@ -255,6 +256,7 @@ class ParamError(RuntimeError):
 
 class AsyncFileDescriptor(object):
     """Async File Descriptor"""
+
     def __init__(self, fd):
         self._loop = asyncio.get_event_loop()
         self._fd = fd
@@ -296,6 +298,33 @@ class AsyncFileDescriptor(object):
         self._closed = True
 
 
+class Process(object):
+    def __init__(self, pid):
+        self._pid = pid
+        self._returncode = None
+        asyncio.ensure_future(self._wait_for_exit())
+
+    @property
+    def returncode(self):
+        return self._returncode
+
+    async def _wait_for_exit(self):
+        while True:
+            try:
+                pid, returncode = os.waitpid(self._pid, os.WNOHANG)
+            except ChildProcessError:
+                logger.warn(
+                    "[%s] Process %d already exited" % (self.__class__.__name__, pid)
+                )
+                self._returncode = -1
+                break
+            if not pid:
+                await asyncio.sleep(0.01)
+            else:
+                self._returncode = returncode
+                break
+
+
 def is_ip_address(addr):
     return tornado.netutil.is_valid_ip(addr)
 
@@ -325,3 +354,17 @@ async def resolve_address(address):
         resolve_cache[address] = {"time": time.time(), "result": result}
         return result
     return address
+
+
+def safe_ensure_future(coro, loop=None):
+    loop = loop or asyncio.get_event_loop()
+    fut = loop.create_future()
+
+    async def _wrap():
+        try:
+            fut.set_result(await coro)
+        except Exception as e:
+            fut.set_exception(e)
+
+    asyncio.ensure_future(_wrap())
+    return fut
