@@ -118,10 +118,6 @@ def main():
     if args.retry:
         server.TunnelServer.retry_count = args.retry
 
-    if sys.platform == "win32":
-        loop = asyncio.ProactorEventLoop()
-        asyncio.set_event_loop(loop)
-
     tunnel_server.start()
     try:
         tornado.ioloop.IOLoop.current().start()

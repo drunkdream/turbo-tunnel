@@ -273,6 +273,9 @@ class SSHTunnelServer(server.TunnelServer, MicroSSHServer):
         )
 
     def start(self):
+        if sys.platform == "win32":
+            loop = asyncio.ProactorEventLoop()
+            asyncio.set_event_loop(loop)
         asyncio.ensure_future(MicroSSHServer.start(self))
 
 
