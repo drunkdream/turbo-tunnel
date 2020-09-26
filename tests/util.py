@@ -3,6 +3,9 @@
 '''
 '''
 
+import random
+import socket
+
 import tornado.tcpserver
 
 
@@ -64,3 +67,16 @@ rules:
     port: 1-65535
     tunnel: block
 '''
+
+
+def get_random_port():
+    while True:
+      port = random.randint(10000, 65000)
+      s = socket.socket()
+      try:
+          s.bind(('127.0.0.1', port))
+      except:
+          continue
+      else:
+          s.close()
+          return port

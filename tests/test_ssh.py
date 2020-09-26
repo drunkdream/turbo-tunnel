@@ -10,7 +10,7 @@ import asyncssh
 import pytest
 
 from turbo_tunnel import ssh, tunnel, utils
-from .util import DemoTCPServer
+from .util import DemoTCPServer, get_random_port
 
 
 async def start_ssh_server(port, username, password=None, public_key=None):
@@ -32,7 +32,7 @@ class TestSSHServer(object):
         cls.password = "password"
 
     async def ensure_start_server(self):
-        self.port = random.randint(10000, 65000)
+        self.port = get_random_port()
         if not hasattr(self, "_server_started") or not self._server_started:
             self.server = await start_ssh_server(
                 self.port, self.username, self.password
@@ -86,7 +86,7 @@ class TestSSHServer(object):
     async def test_tcp_forward(self):
         await self.ensure_start_server()
         server = DemoTCPServer()
-        port = random.randint(10000, 65000)
+        port = get_random_port()
         server.listen(port)
         options = {
             "known_hosts": None,
@@ -112,7 +112,7 @@ class TestSSHTunnel(object):
     def setup_class(cls):
         cls.username = "root"
         cls.public_key = "password"
-        cls.port = random.randint(10000, 65000)
+        cls.port = get_random_port()
         id_rsa = asyncssh.generate_private_key("ssh-rsa")
         id_rsa.write_private_key("id_rsa")
         id_rsa.write_public_key("id_rsa.pub")
@@ -136,7 +136,7 @@ class TestSSHTunnel(object):
     async def test_tcp_forward(self):
         await self.ensure_start_server()
         server1 = DemoTCPServer()
-        port1 = random.randint(10000, 65000)
+        port1 = get_random_port()
         server1.listen(port1)
 
         s = socket.socket()
