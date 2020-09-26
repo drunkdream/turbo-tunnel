@@ -3,8 +3,9 @@
 """
 
 import asyncio
-import shlex
+import ctypes
 import os
+import shlex
 import socket
 import sys
 
@@ -71,16 +72,19 @@ class MicroSSHServer(asyncssh.SSHServer):
             stderr = proc.stderr
         else:
             if sys.platform == "win32":
-                cmd = (
-                    "conhost.exe",
-                    "--headless",
-                    "--width",
-                    str(size[0]),
-                    "--height",
-                    str(size[1]),
-                    "--",
-                    command or "cmd.exe",
-                )
+                if hasattr(ctypes.windll.kernel32, "CreatePseudoConsole"):
+                    cmd = (
+                        "conhost.exe",
+                        "--headless",
+                        "--width",
+                        str(size[0]),
+                        "--height",
+                        str(size[1]),
+                        "--",
+                        command or "cmd.exe",
+                    )
+                else:
+                    cmd = (command or "cmd.exe",)
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdin=asyncio.subprocess.PIPE,
@@ -200,6 +204,9 @@ class MicroSSHServer(asyncssh.SSHServer):
             process.exit(-1)
 
     async def start(self):
+        line_editor = sys.platform == "win32" and not hasattr(
+            ctypes.windll.kernel32, "CreatePseudoConsole"
+        )
         try:
             self._conn = await asyncssh.create_server(
                 lambda: MicroSSHServer(
@@ -215,7 +222,7 @@ class MicroSSHServer(asyncssh.SSHServer):
                 process_factory=lambda process: asyncio.ensure_future(
                     self.handle_process(process)
                 ),
-                line_editor=False,
+                line_editor=line_editor,
             )
         except OSError as e:
             utils.logger.error(
