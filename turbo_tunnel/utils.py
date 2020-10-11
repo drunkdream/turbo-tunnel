@@ -33,6 +33,7 @@ class Url(object):
             self._host = "0.0.0.0"
         self._path = obj.path
         self._query = obj.query
+        self._params = None
 
     def __str__(self):
         port = self.port or ""
@@ -44,7 +45,11 @@ class Url(object):
             port = ""
         elif port:
             port = ":%d" % port
-        return "%s://%s%s%s" % (self._protocol, self._host, port, self._path)
+        url = "%s://%s%s%s" % (self._protocol, self._host, port, self._path)
+        query = self.query
+        if query:
+            url += "?" + query
+        return url
 
     def __eq__(self, other):
         if not other:
@@ -61,6 +66,10 @@ class Url(object):
     @property
     def protocol(self):
         return self._protocol
+
+    @protocol.setter
+    def protocol(self, proto):
+        self._protocol = proto
 
     @property
     def host(self):
@@ -94,20 +103,27 @@ class Url(object):
         self._path = value
 
     @property
+    def query(self):
+        if self._params is None:
+            return self._query
+        return "&".join(["%s=%s" % (key, self._params[key]) for key in self._params])
+
+    @property
     def params(self):
-        result = {}
-        if not self._query:
-            return result
-        items = self._query.split("&")
-        for item in items:
-            if "=" not in item:
-                continue
-            key, value = item.split("=", 1)
-            if key in result and not isinstance(result[key], list):
-                result[key] = [result[key]]
-            else:
-                result[key] = urllib.parse.unquote(value)
-        return result
+        if self._params is None:
+            result = {}
+            if self._query:
+                items = self._query.split("&")
+                for item in items:
+                    if "=" not in item:
+                        continue
+                    key, value = item.split("=", 1)
+                    if key in result and not isinstance(result[key], list):
+                        result[key] = [result[key]]
+                    else:
+                        result[key] = urllib.parse.unquote(value)
+            self._params = result
+        return self._params
 
 
 class Singleton(object):
