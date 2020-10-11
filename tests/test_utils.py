@@ -26,6 +26,12 @@ def test_url():
     url = utils.Url("https://www.qq.com/test")
     assert url.protocol == "https"
     assert url.port == 443
+    url.protocol = "http"
+    assert url.protocol == "http"
+    url.params["p"] = 123
+    assert url.params["p"] == 123
+    assert url.query == "p=123"
+    assert str(url) == "http://www.qq.com/test?p=123"
 
     url = utils.Url("tcp://:8080/")
     assert url.host == "0.0.0.0"
