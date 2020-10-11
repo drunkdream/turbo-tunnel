@@ -112,17 +112,16 @@ class Url(object):
     def params(self):
         if self._params is None:
             result = {}
-            if not self._query:
-                return result
-            items = self._query.split("&")
-            for item in items:
-                if "=" not in item:
-                    continue
-                key, value = item.split("=", 1)
-                if key in result and not isinstance(result[key], list):
-                    result[key] = [result[key]]
-                else:
-                    result[key] = urllib.parse.unquote(value)
+            if self._query:
+                items = self._query.split("&")
+                for item in items:
+                    if "=" not in item:
+                        continue
+                    key, value = item.split("=", 1)
+                    if key in result and not isinstance(result[key], list):
+                        result[key] = [result[key]]
+                    else:
+                        result[key] = urllib.parse.unquote(value)
             self._params = result
         return self._params
 
