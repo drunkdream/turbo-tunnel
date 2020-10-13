@@ -90,7 +90,6 @@ class MicroSSHServer(asyncssh.SSHServer):
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    close_fds=True
                 )
                 stdin = proc.stdin
                 stdout = proc.stdout
@@ -368,6 +367,9 @@ class SSHTunnel(tunnel.Tunnel):
                 await ssh_conn.wait_closed()
                 return None
             except Exception:
+                import traceback
+
+                traceback.print_exc()
                 ssh_conn.abort()
                 await ssh_conn.wait_closed()
                 return None
@@ -392,6 +394,9 @@ class SSHTunnel(tunnel.Tunnel):
                 self._addr, self._port
             )
         except asyncssh.ChannelOpenError as e:
+            import traceback
+
+            traceback.print_exc()
             utils.logger.warn(
                 "[%s] Connect %s:%d over %s failed: %s"
                 % (self.__class__.__name__, self._addr, self._port, self._url, e)
