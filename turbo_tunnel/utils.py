@@ -7,6 +7,8 @@ import inspect
 import logging
 import os
 import socket
+import subprocess
+import sys
 import time
 import urllib.parse
 
@@ -384,3 +386,17 @@ def safe_ensure_future(coro, loop=None):
 
     asyncio.ensure_future(_wrap())
     return fut
+
+
+def win32_daemon():
+    cmdline = []
+    for it in sys.argv:
+        if it not in ("-d", "--daemon"):
+            cmdline.append(it)
+
+    DETACHED_PROCESS = 8
+    subprocess.Popen(
+        cmdline,
+        creationflags=DETACHED_PROCESS,
+        close_fds=True
+    )
