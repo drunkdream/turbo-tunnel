@@ -88,6 +88,9 @@ def main():
         import daemon
 
         daemon.DaemonContext(stderr=open("error.txt", "w")).open()
+    elif args.daemon:
+        utils.win32_daemon()
+        return 0
 
     handler = logging.StreamHandler()
     formatter = logging.Formatter("[%(asctime)s][%(levelname)s]%(message)s")
