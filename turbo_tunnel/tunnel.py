@@ -333,19 +333,26 @@ class SSLTunnel(Tunnel, asyncio.Protocol):
             self._read_event.set()
 
     def __init__(
-        self, tunnel, url=None, address=None, sslcontext=None, server_hostname=None
+        self,
+        tunnel,
+        url=None,
+        address=None,
+        sslcontext=None,
+        verify_ssl=True,
+        server_hostname=None,
     ):
         super(SSLTunnel, self).__init__(tunnel, url, address)
         loop = asyncio.get_event_loop()
         self._connect_waiter = asyncio.Future()
         self._stream_reader = self.__class__.StreamReader(self.connection_made)
-        if url and url.params.get("verify_ssl") == "false":
+        if not verify_ssl or url and url.params.get("verify_ssl") == "false":
             if not sslcontext:
                 sslcontext = ssl.create_default_context()
             sslcontext.check_hostname = False
             sslcontext.verify_mode = ssl.CERT_NONE
         elif url and not server_hostname:
             server_hostname = url.params.get("server_hostname")
+
         self._ssl_protocol = asyncio.sslproto.SSLProtocol(
             loop,
             self._stream_reader,
@@ -358,7 +365,7 @@ class SSLTunnel(Tunnel, asyncio.Protocol):
         self._down_transport = None
 
     def __str__(self):
-        return "SSL%s" % self._tunnel
+        return "SSLTunnel(%s)" % self._tunnel
 
     async def connect(self):
         self._ssl_protocol.connection_made(self._up_transport)
@@ -377,7 +384,7 @@ class SSLTunnel(Tunnel, asyncio.Protocol):
         self._down_transport = transport
 
     def connection_lost(self, exc):
-        utils.logger.info("[%s] SSL connection lost" % self.__class__.__name__)
+        utils.logger.debug("[%s] SSL connection lost" % self.__class__.__name__)
         if self._ssl_protocol:
             self._ssl_protocol.connection_lost(exc)
             self._ssl_protocol = None
@@ -405,7 +412,12 @@ class SSLTunnel(Tunnel, asyncio.Protocol):
             self._down_transport = None
 
     def data_received(self, buffer):
-        self._ssl_protocol.data_received(buffer)
+        try:
+            self._ssl_protocol.data_received(buffer)
+        except ssl.CertificateError:
+            utils.logger.exception(
+                "[%s] SSL verify certificate failed" % self.__class__.__name__
+            )
 
 
 class TunnelTransport(asyncio.Transport):
@@ -434,12 +446,15 @@ class TunnelTransport(asyncio.Transport):
         self.close()
 
     def close(self):
-        if self._protocol:
-            self._protocol.connection_lost(None)
-            self._protocol = None
-        if self._tunnel:
-            self._tunnel.close()
-            self._tunnel = None
+        async def _close():
+            if self._protocol:
+                self._protocol.connection_lost(None)
+                self._protocol = None
+            if self._tunnel:
+                self._tunnel.close()
+                self._tunnel = None
+
+        utils.AsyncTaskManager().start_task(_close())  # Avoid breaking ssl closing
 
     def _force_close(self, exc):
         self.close()
