@@ -62,8 +62,12 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         ):
             tun = tunn
             if ssl_options is not None:
+                url = utils.Url(self._url)
                 tun = tunnel.SSLTunnel(
-                    tun, sslcontext=ssl_options, server_hostname=host
+                    tun,
+                    sslcontext=ssl_options,
+                    verify_ssl=url.params.get("verify_ssl") != "false",
+                    server_hostname=url.params.get("server_hostname", host),
                 )
                 await tun.connect()
             stream = tunnel.TunnelIOStream(tun)
@@ -333,3 +337,4 @@ class WebSocketTunnelServer(server.TunnelServer):
 
 registry.tunnel_registry.register("ws", WebSocketTunnel)
 registry.server_registry.register("ws", WebSocketTunnelServer)
+registry.tunnel_registry.register("wss", WebSocketTunnel)
