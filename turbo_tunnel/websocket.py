@@ -60,7 +60,14 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             source_port=None,
             timeout=None,
         ):
-            return tunnel.TunnelIOStream(tunn)
+            tun = tunn
+            if ssl_options is not None:
+                tun = tunnel.SSLTunnel(
+                    tun, sslcontext=ssl_options, server_hostname=host
+                )
+                await tun.connect()
+            stream = tunnel.TunnelIOStream(tun)
+            return stream
 
         class TCPClientPatchContext(object):
             def __init__(self, patched_connect):
@@ -119,7 +126,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
     async def read(self):
         while not self._buffer:
             if self._closed:
-                raise utils.TunnelClosedError()
+                raise utils.TunnelClosedError(self)
             await self._read_event.wait()
             self._read_event.clear()
         buffer = self._buffer
@@ -130,7 +137,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         try:
             await self.write_message(buffer, True)
         except tornado.websocket.WebSocketClosedError:
-            raise utils.TunnelClosedError()
+            raise utils.TunnelClosedError(self)
         return len(buffer)
 
 
