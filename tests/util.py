@@ -11,8 +11,8 @@ import tornado.tcpserver
 
 class DemoTCPServer(tornado.tcpserver.TCPServer):
 
-    def __init__(self, autoclose=False):
-        super(DemoTCPServer, self).__init__()
+    def __init__(self, autoclose=False, ssl_options=None):
+        super(DemoTCPServer, self).__init__(ssl_options=ssl_options)
         self._autoclose = autoclose
         self._stream = None
 
