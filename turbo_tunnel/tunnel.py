@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-'''Tunnel
-'''
+"""Tunnel
+"""
 
 import asyncio
+import asyncio.sslproto
+import inspect
 import re
 import socket
+import ssl
 import time
 
 import tornado.iostream
@@ -14,8 +17,8 @@ from . import utils
 
 
 class Tunnel(utils.IStream):
-    '''Tunnel base class
-    '''
+    """Tunnel base class"""
+
     timeout = 15
 
     def __init__(self, tunnel, url, address):
@@ -24,15 +27,15 @@ class Tunnel(utils.IStream):
         self._addr, self._port = address or (None, None)
         if (not self._addr or not self._port) and url:
             self._addr, self._port = url.host, url.port
-        assert (self._addr and self._port)
+        assert self._addr and self._port
         self._running = True
         self._connected = False
 
     def __str__(self):
         address = self._url
         if not address:
-            address = '%s:%d' % (self._addr, self._port)
-        return '%s %s' % (self.__class__.__name__, address)
+            address = "%s:%d" % (self._addr, self._port)
+        return "%s %s" % (self.__class__.__name__, address)
 
     @classmethod
     def has_cache(cls, url):
@@ -52,16 +55,21 @@ class Tunnel(utils.IStream):
         return self._tunnel.closed()
 
     def on_read(self, buffer):
-        utils.logger.debug('[%s] Recv %d bytes from upstream' %
-                           (self.__class__.__name__, len(buffer)))
+        utils.logger.debug(
+            "[%s] Recv %d bytes from upstream" % (self.__class__.__name__, len(buffer))
+        )
 
     def on_close(self):
-        address = ''
-        if self._addr and self._port and (self._addr != self._url.host
-                                          or self._port != self._url.port):
-            address = '/%s/%d' % (self._addr, self._port)
-        utils.logger.warn('[%s] Upstream %s%s closed' %
-                          (self.__class__.__name__, self._url, address))
+        address = ""
+        if (
+            self._addr
+            and self._port
+            and (self._addr != self._url.host or self._port != self._url.port)
+        ):
+            address = "/%s/%d" % (self._addr, self._port)
+        utils.logger.warn(
+            "[%s] Upstream %s%s closed" % (self.__class__.__name__, self._url, address)
+        )
         self.close()
 
     async def wait_for_connecting(self):
@@ -72,12 +80,12 @@ class Tunnel(utils.IStream):
             else:
                 break
         else:
-            raise utils.TimeoutError('Wait for connecting timeout')
+            raise utils.TimeoutError("Wait for connecting timeout")
 
 
 class TCPTunnel(Tunnel):
-    '''TCP Tunnel
-    '''
+    """TCP Tunnel"""
+
     def __init__(self, tunnel, url=None, address=None, server_side=False):
         self._stream = None
         if isinstance(tunnel, socket.socket):
@@ -85,7 +93,7 @@ class TCPTunnel(Tunnel):
         elif isinstance(tunnel, tornado.iostream.IOStream):
             self._stream = tunnel
         elif not isinstance(tunnel, Tunnel):
-            raise ValueError('Invalid param: %r' % tunnel)
+            raise ValueError("Invalid param: %r" % tunnel)
 
         self._server_side = server_side
         if self._stream and not address:
@@ -93,19 +101,23 @@ class TCPTunnel(Tunnel):
                 address = self._stream.socket.getsockname()
             else:
                 address = self._stream.socket.getpeername()
-        super(TCPTunnel, self).__init__(tunnel if not self._stream else None,
-                                        url, address)
+        super(TCPTunnel, self).__init__(
+            tunnel if not self._stream else None, url, address
+        )
 
     def __getattr__(self, attr):
         if self._stream:
             try:
                 return getattr(self._stream, attr)
             except AttributeError:
-                raise AttributeError("'%s' object has no attribute '%s'" %
-                                     (self.__class__.__name__, attr))
+                raise AttributeError(
+                    "'%s' object has no attribute '%s'"
+                    % (self.__class__.__name__, attr)
+                )
         else:
-            raise AttributeError("'%s' object has no attribute '%s'" %
-                                 (self.__class__.__name__, attr))
+            raise AttributeError(
+                "'%s' object has no attribute '%s'" % (self.__class__.__name__, attr)
+            )
 
     @property
     def socket(self):
@@ -133,8 +145,9 @@ class TCPTunnel(Tunnel):
             try:
                 return await self._stream.connect((self._addr, self._port))
             except tornado.iostream.StreamClosedError:
-                raise utils.TunnelConnectError('Connect %s:%d failed' %
-                                               (self._addr, self._port))
+                raise utils.TunnelConnectError(
+                    "Connect %s:%d failed" % (self._addr, self._port)
+                )
         return True
 
     async def read(self):
@@ -158,7 +171,9 @@ class TCPTunnel(Tunnel):
                 if not timeout:
                     buffer = await self._stream.read_until(delimiter)
                 else:
-                    buffer = await asyncio.wait_for(self._stream.read_until(delimiter), timeout)
+                    buffer = await asyncio.wait_for(
+                        self._stream.read_until(delimiter), timeout
+                    )
             except tornado.iostream.StreamClosedError:
                 pass
             else:
@@ -172,16 +187,21 @@ class TCPTunnel(Tunnel):
 
     async def write(self, buffer):
         if self._stream:
-            return await self._stream.write(buffer)
+            try:
+                return await self._stream.write(buffer)
+            except tornado.iostream.StreamClosedError:
+                raise utils.TunnelClosedError(self)
         elif self._tunnel:
             return await self._tunnel.write(buffer)
         else:
             raise utils.TunnelClosedError(self)
 
     def close(self):
-        message = '[%s] %s%s closed' % (self.__class__.__name__,
-                                        ('Serverside '
-                                         if self._server_side else ''), self)
+        message = "[%s] %s%s closed" % (
+            self.__class__.__name__,
+            ("Serverside " if self._server_side else ""),
+            self,
+        )
         if self._stream:
             self._stream.close()
             self._stream = None
@@ -193,19 +213,18 @@ class TCPTunnel(Tunnel):
 
 
 class TunnelIOStream(tornado.iostream.BaseIOStream):
-    '''Tunnel to IOStream
-    '''
+    """Tunnel to IOStream"""
+
     def __init__(self, tunnel):
         super(TunnelIOStream, self).__init__()
         self._tunnel = tunnel
-        self._buffer = b''
+        self._buffer = b""
         self._close_callback = None
         self._read_event = asyncio.Event()
         utils.AsyncTaskManager().start_task(self.transfer_data_task())
 
     async def transfer_data_task(self):
-        '''transfer data from tunnel to iostream
-        '''
+        """transfer data from tunnel to iostream"""
         while self._tunnel:
             try:
                 buffer = await self._tunnel.read()
@@ -237,13 +256,13 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
                 return buffer
             elif partial and self._buffer:
                 buffer = self._buffer
-                self._buffer = b''
+                self._buffer = b""
                 return buffer
 
     async def read_until_regex(self, regex, max_bytes=None):
         read_regex = re.compile(regex)
         while True:
-            if not self._buffer or (not partial and len(self._buffer) < num_bytes):
+            if not self._buffer:
                 if not self._tunnel:
                     assert not self._buffer
                     raise tornado.iostream.StreamClosedError()
@@ -255,8 +274,8 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
                 raise tornado.iostream.StreamClosedError()
             m = read_regex.search(self._buffer)
             if m is not None:
-                buffer = self._buffer[:m.end()]
-                self._buffer = self._buffer[m.end():]
+                buffer = self._buffer[: m.end()]
+                self._buffer = self._buffer[m.end() :]
                 return buffer
 
     def set_close_callback(self, callback):
@@ -275,7 +294,7 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
         elif len(buf) >= len(self._buffer):
             buf[:] = self._buffer
             read_size = len(self._buffer)
-            self._buffer = b''
+            self._buffer = b""
             return read_size
         else:
             array_size = len(buf)
@@ -288,37 +307,157 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
         return len(data)
 
 
-class TunnelTransport(asyncio.Transport):
-    '''Tunnel to Transport
-    '''
-    def __init__(self, tunnel, handler):
-        super(TunnelTransport, self).__init__()
-        self._tunnel = tunnel
-        self._handler = handler
-        self._extra['socket'] = self._tunnel.socket
-        self._extra['sockname'] = self._tunnel.socket.getsockname()
-        self._extra['peername'] = self._tunnel.socket.getpeername()
-        utils.AsyncTaskManager().start_task(self.transfer_data_task())
+class SSLTunnel(Tunnel, asyncio.Protocol):
+    """SSL Tunnel"""
 
-    def write(self, data):
-        utils.AsyncTaskManager().start_task(self._tunnel.write(data))
+    class StreamReader(asyncio.Protocol):
+        def __init__(self, on_connection_made):
+            self._on_connection_made = on_connection_made
+            self._read_event = asyncio.Event()
+            self._buffer = b""
 
-    def abort(self):
+        def connection_made(self, transport):
+            self._on_connection_made(transport)
+
+        async def read(self):
+            await self._read_event.wait()
+            self._read_event.clear()
+            buffer = self._buffer
+            self._buffer = b""
+            return buffer
+
+        def data_received(self, buffer):
+            self._buffer += buffer
+            self._read_event.set()
+
+        def connection_lost(self, exc):
+            self._read_event.set()
+
+    def __init__(
+        self, tunnel, url=None, address=None, sslcontext=None, server_hostname=None
+    ):
+        super(SSLTunnel, self).__init__(tunnel, url, address)
+        loop = asyncio.get_event_loop()
+        self._connect_waiter = asyncio.Future()
+        self._stream_reader = self.__class__.StreamReader(self.connection_made)
+        if url and url.params.get("verify_ssl") == "false":
+            if not sslcontext:
+                sslcontext = ssl.create_default_context()
+            sslcontext.check_hostname = False
+            sslcontext.verify_mode = ssl.CERT_NONE
+        self._ssl_protocol = asyncio.sslproto.SSLProtocol(
+            loop,
+            self._stream_reader,
+            sslcontext,
+            self._connect_waiter,
+            server_side=False,
+            server_hostname=server_hostname,
+        )
+        self._up_transport = TunnelTransport(tunnel, self)
+        self._down_transport = None
+
+    def __str__(self):
+        return "SSL%s" % self._tunnel
+
+    async def connect(self):
+        self._ssl_protocol.connection_made(self._up_transport)
+        try:
+            await self._connect_waiter
+        except:
+            utils.logger.exception(
+                "[%s] SSL handshake failed" % self.__class__.__name__
+            )
+            return False
+        else:
+            self._connected = True
+            return True
+
+    def connection_made(self, transport):
+        self._down_transport = transport
+
+    def connection_lost(self, exc):
+        utils.logger.info("[%s] SSL connection lost" % self.__class__.__name__)
+        if self._ssl_protocol:
+            self._ssl_protocol.connection_lost(exc)
+            self._ssl_protocol = None
         self._tunnel.close()
 
+    async def read(self):
+        if not self._connected:
+            await self.wait_for_connecting()
+        buffer = await self._stream_reader.read()
+        if not buffer:
+            raise utils.TunnelClosedError(self)
+        return buffer
+
+    async def write(self, buffer):
+        if self._down_transport is None:
+            raise utils.TunnelClosedError(self)
+        self._down_transport.write(buffer)
+
+    def close(self):
+        if self._up_transport:
+            self._up_transport.close()
+            self._up_transport = None
+        if self._down_transport:
+            self._down_transport.close()
+            self._down_transport = None
+
+    def data_received(self, buffer):
+        self._ssl_protocol.data_received(buffer)
+
+
+class TunnelTransport(asyncio.Transport):
+    """Tunnel to Transport"""
+
+    def __init__(self, tunnel, protocol):
+        super(TunnelTransport, self).__init__()
+        self._tunnel = tunnel
+        self._protocol = protocol
+        self._extra["socket"] = self._tunnel.socket
+        self._extra["sockname"] = self._tunnel.socket.getsockname()
+        self._extra["peername"] = self._tunnel.socket.getpeername()
+        utils.AsyncTaskManager().start_task(self.transfer_data_task())
+
+    def on_error(self, exc):
+        self.close()
+
+    def write(self, data):
+        if self._tunnel is None:
+            raise utils.TunnelClosedError(self)
+        return utils.AsyncTaskManager().start_task(
+            self._tunnel.write(data), self.on_error
+        )
+
+    def abort(self):
+        self.close()
+
+    def close(self):
+        if self._protocol:
+            self._protocol.connection_lost(None)
+            self._protocol = None
+        if self._tunnel:
+            self._tunnel.close()
+            self._tunnel = None
+
+    def _force_close(self, exc):
+        self.close()
+        raise exc
+
     def closed(self):
-        return self._tunnel.closed()
+        return not self._tunnel or self._tunnel.closed()
 
     async def transfer_data_task(self):
-        while True:
+        while self._tunnel:
             try:
                 buffer = await self._tunnel.read()
             except utils.TunnelClosedError:
                 break
             if buffer:
-                self._handler.data_received(buffer)
+                self._protocol.data_received(buffer)
             else:
                 break
 
 
-registry.tunnel_registry.register('tcp', TCPTunnel)
+registry.tunnel_registry.register("tcp", TCPTunnel)
+registry.tunnel_registry.register("ssl", SSLTunnel)
