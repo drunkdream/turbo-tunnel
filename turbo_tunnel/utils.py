@@ -151,7 +151,7 @@ class AsyncTaskManager(object):
     def running_tasks(self):
         return self._async_tasks
 
-    async def wrap_task(self, task):
+    async def wrap_task(self, task, cb_exc=None):
         self._async_tasks.append(task)
         logger.debug("[%s] Task %s start" % (self.__class__.__name__, task.__name__))
         try:
@@ -160,16 +160,19 @@ class AsyncTaskManager(object):
             logger.warning(
                 "[%s] Task %s force stopped" % (self.__class__.__name__, task.__name__)
             )
-        except:
-            logger.exception(
-                "[%s] Task %s crash" % (self.__class__.__name__, task.__name__)
-            )
+        except Exception as ex:
+            if cb_exc:
+                cb_exc(ex)
+            else:
+                logger.exception(
+                    "[%s] Task %s crash" % (self.__class__.__name__, task.__name__)
+                )
         else:
             logger.debug("[%s] Task %s exit" % (self.__class__.__name__, task.__name__))
         self._async_tasks.remove(task)
 
-    def start_task(self, task):
-        return asyncio.ensure_future(self.wrap_task(task))
+    def start_task(self, task, cb_exc=None):
+        return asyncio.ensure_future(self.wrap_task(task, cb_exc))
 
     async def wait_for_tasks(self, tasks):
         """wait until one task complete"""
