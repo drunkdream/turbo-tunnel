@@ -27,7 +27,6 @@ class Tunnel(utils.IStream):
         self._addr, self._port = address or (None, None)
         if (not self._addr or not self._port) and url:
             self._addr, self._port = url.host, url.port
-        assert self._addr and self._port
         self._running = True
         self._connected = False
 
@@ -345,6 +344,8 @@ class SSLTunnel(Tunnel, asyncio.Protocol):
                 sslcontext = ssl.create_default_context()
             sslcontext.check_hostname = False
             sslcontext.verify_mode = ssl.CERT_NONE
+        elif url and not server_hostname:
+            server_hostname = url.params.get("server_hostname")
         self._ssl_protocol = asyncio.sslproto.SSLProtocol(
             loop,
             self._stream_reader,
