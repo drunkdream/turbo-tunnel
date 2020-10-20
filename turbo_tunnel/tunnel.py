@@ -280,6 +280,9 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
     def set_close_callback(self, callback):
         self._close_callback = callback
 
+    def closed(self):
+        return not self._tunnel or self._tunnel.closed()
+
     def close(self, exc_info=False):
         if self._close_callback:
             self._close_callback()
