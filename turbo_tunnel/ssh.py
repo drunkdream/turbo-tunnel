@@ -7,6 +7,7 @@ import ctypes
 import os
 import shlex
 import socket
+import struct
 import sys
 
 import asyncssh
@@ -21,7 +22,7 @@ from . import utils
 class MicroSSHServer(asyncssh.SSHServer):
     """Micro SSH Server"""
 
-    welcome = """Welcome to turbo-tunnel micro ssh server\n\n"""
+    welcome = b"""Welcome to turbo-tunnel micro ssh server\n\n"""
 
     def __init__(
         self, listen_address, server_host_keys, username, password=None, public_key=None
@@ -57,6 +58,21 @@ class MicroSSHServer(asyncssh.SSHServer):
 
     async def connection_requested(self, dest_host, dest_port, orig_host, orig_port):
         return await self._conn.forward_connection(dest_host, dest_port)
+
+    def resize(self, fd, size):
+        utils.logger.info(
+            "[%s] Terminal window resize to (%d, %d)"
+            % (self.__class__.__name__, size[0], size[1])
+        )
+        if sys.platform == "win32":
+            # TODO
+            pass
+        else:
+            import fcntl
+            import termios
+
+            winsize = struct.pack("HHHH", size[1], size[0], 0, 0)
+            fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
 
     async def _create_process(self, interactive, command, size):
         if not interactive:
@@ -115,6 +131,7 @@ class MicroSSHServer(asyncssh.SSHServer):
                     except Exception as e:
                         sys.stderr.write(str(e))
                 else:
+                    self.resize(fd, size)
                     proc = utils.Process(pid)
                     stdin = utils.AsyncFileDescriptor(fd)
                     stdout = utils.AsyncFileDescriptor(fd)
@@ -163,29 +180,22 @@ class MicroSSHServer(asyncssh.SSHServer):
                     buffer = task.result()
                 except asyncssh.BreakReceived:
                     return -1
-                except asyncssh.TerminalSizeChanged:
-                    # TODO
+                except asyncssh.TerminalSizeChanged as e:
+                    self.resize(stdout, (e.width, e.height))
                     continue
-
-                if isinstance(buffer, bytes):
-                    try:
-                        buffer = buffer.decode("utf8")
-                    except:
-                        buffer = buffer.decode("gbk")
 
                 if not buffer:
                     return -1
 
                 if index == 0:
-                    if buffer.endswith("\r") and sys.platform == "win32":
-                        buffer += "\n"
+                    if buffer.endswith(b"\r") and sys.platform == "win32":
+                        buffer += b"\n"
 
-                    buffer = buffer.encode()
                     stdin.write(buffer)
                 elif index == 1:
                     process.stdout.write(buffer)
                 else:
-                    buffer = buffer.replace("\r\n", "\r").replace("\r", "\r\n")
+                    buffer = buffer.replace(b"\r\n", b"\r").replace(b"\r", b"\r\n")
                     process.stderr.write(buffer)
 
         return proc.returncode
@@ -221,6 +231,7 @@ class MicroSSHServer(asyncssh.SSHServer):
                 process_factory=lambda process: asyncio.ensure_future(
                     self.handle_process(process)
                 ),
+                encoding=None,
                 line_editor=line_editor,
             )
         except OSError as e:
