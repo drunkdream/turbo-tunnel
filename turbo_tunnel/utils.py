@@ -286,6 +286,9 @@ class AsyncFileDescriptor(object):
         self._loop.add_reader(self._fd, self.read_callback)
         self._closed = False
 
+    def fileno(self):
+        return self._fd
+
     def close(self):
         self._loop.remove_reader(self._fd)
 
