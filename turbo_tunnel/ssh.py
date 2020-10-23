@@ -279,6 +279,13 @@ class SSHTunnelServer(server.TunnelServer, MicroSSHServer):
                 skey = asyncssh.generate_private_key("ssh-rsa")
                 skey.write_private_key(private_key_path)
                 skey.write_public_key(private_key_path + ".pub")
+        private_key_path = os.path.abspath(private_key_path)
+        if not os.path.isfile(private_key_path):
+            raise ValueError("Private key file %s not exist" % private_key_path)
+        if public_key_path:
+            public_key_path = os.path.abspath(public_key_path)
+            if not os.path.isfile(public_key_path):
+                raise ValueError("Public key file %s not exist" % public_key_path)
 
         MicroSSHServer.__init__(
             self,
@@ -377,13 +384,6 @@ class SSHTunnel(tunnel.Tunnel):
                 ssh_conn.abort()
                 await ssh_conn.wait_closed()
                 return None
-            except Exception:
-                import traceback
-
-                traceback.print_exc()
-                ssh_conn.abort()
-                await ssh_conn.wait_closed()
-                return None
             self.__class__.ssh_conns[key] = ssh_conn
         return self.__class__.ssh_conns[key]
 
@@ -391,23 +391,12 @@ class SSHTunnel(tunnel.Tunnel):
         ssh_conn = await self.create_ssh_conn()
         if not ssh_conn:
             return False
-        this = self
-
-        class SSHTCPSession(asyncssh.SSHTCPSession):
-            def data_received(self, data, datatype):
-                this._buffer += data
-
-            def connection_lost(self, exc):
-                this._closed = True
 
         try:
             self._reader, self._writer = await ssh_conn.open_connection(
                 self._addr, self._port
             )
         except asyncssh.ChannelOpenError as e:
-            import traceback
-
-            traceback.print_exc()
             utils.logger.warn(
                 "[%s] Connect %s:%d over %s failed: %s"
                 % (self.__class__.__name__, self._addr, self._port, self._url, e)
