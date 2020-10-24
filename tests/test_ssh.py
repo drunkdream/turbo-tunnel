@@ -149,3 +149,21 @@ class TestSSHTunnel(object):
         await ssh_tunn.write(message + b"\n")
         buffer = await ssh_tunn.read()
         assert buffer.strip() == message
+
+    @pytest.mark.asyncio
+    async def test_fork_tunnel(self):
+        await self.ensure_start_server()
+        server1 = DemoTCPServer()
+        port1 = get_random_port()
+        server1.listen(port1)
+
+        s = socket.socket()
+        tunn = tunnel.TCPTunnel(s, address=("127.0.0.1", self.port))
+        await tunn.connect()
+        url = "ssh://%s@127.0.0.1:%d/?private_key=id_rsa" % (self.username, self.port)
+        ssh_tunn = ssh.SSHTunnel(tunn, utils.Url(url), address=("127.0.0.1", port1))
+        fork_ssh_tunn = await ssh_tunn.fork()
+        message = b"Hello ssh!"
+        await fork_ssh_tunn.write(message + b"\n")
+        buffer = await fork_ssh_tunn.read()
+        assert buffer.strip() == message
