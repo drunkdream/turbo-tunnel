@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-'''Tunnel Chain
-'''
+"""Tunnel Chain
+"""
 
 import socket
 import time
@@ -14,8 +14,7 @@ from . import utils
 
 
 class TunnelChain(object):
-    '''Tunnel Chain
-    '''
+    """Tunnel Chain"""
 
     def __init__(self, tunnel_router_or_urls, try_connect_count=1):
         self._tunnel_router = self._tunnel_urls = None
@@ -55,8 +54,9 @@ class TunnelChain(object):
                 except utils.TunnelConnectError as e:
                     if i < self._try_connect_count - 1:
                         utils.logger.exception(
-                            '[%s] Call function %s %d failed' %
-                            (self.__class__.__name__, func.__name__, (i + 1)))
+                            "[%s] Call function %s %d failed"
+                            % (self.__class__.__name__, func.__name__, (i + 1))
+                        )
                         await tornado.gen.sleep(1)
                     else:
                         raise e
@@ -67,36 +67,45 @@ class TunnelChain(object):
         for i, url in enumerate(self._tunnel_urls[::-1]):
             tunnel_class = registry.tunnel_registry[url.protocol]
             if not tunnel_class:
-                raise utils.TunnelError('%s tunnel not registered' %
-                                        url.protocol.upper())
+                raise utils.TunnelError(
+                    "%s tunnel not registered" % url.protocol.upper()
+                )
             if tunnel_class.has_cache(url):
                 return len(self._tunnel_urls) - i - 1
         return -1
 
     async def create_tunnel(self, address):
         if self._tunnel_router:
-            selected_rule, selected_tunnel = await self._tunnel_router.select(
-                address)
-            registry.plugin_registry.notify('tunnel_selected', address,
-                                            selected_rule, selected_tunnel)
-            if selected_rule == 'block':
+            selected_rule, selected_tunnel = await self._tunnel_router.select(address)
+            registry.plugin_registry.notify(
+                "tunnel_selected", address, selected_rule, selected_tunnel
+            )
+            if selected_rule == "block":
                 utils.logger.warn(
-                    '[%s] Address %s:%d is blocked' %
-                    (self.__class__.__name__, address[0], address[1]))
-                raise utils.TunnelBlockedError('%s:%d' % (address))
+                    "[%s] Address %s:%d is blocked"
+                    % (self.__class__.__name__, address[0], address[1])
+                )
+                raise utils.TunnelBlockedError("%s:%d" % (address))
 
             self._tunnel_urls = selected_tunnel.urls
             utils.logger.info(
-                '[%s] Select tunnel [%s] %s to access %s:%d' %
-                (self.__class__.__name__, selected_rule, ', '.join(
-                    [str(url)
-                     for url in self._tunnel_urls]), address[0], address[1]))
+                "[%s] Select tunnel [%s] %s to access %s:%d"
+                % (
+                    self.__class__.__name__,
+                    selected_rule,
+                    ", ".join([str(url) for url in self._tunnel_urls]),
+                    address[0],
+                    address[1],
+                )
+            )
 
         tunnel_address = address
-        if self._tunnel_urls and self._tunnel_urls[
-                0].host and self._tunnel_urls[0].port:
-            tunnel_address = (self._tunnel_urls[0].host,
-                              self._tunnel_urls[0].port)
+        if (
+            self._tunnel_urls
+            and self._tunnel_urls[0].host
+            and self._tunnel_urls[0].port
+        ):
+            tunnel_address = (self._tunnel_urls[0].host, self._tunnel_urls[0].port)
 
         tunnel_urls = self._tunnel_urls[:]
         cached_tunnel_index = self.get_cached_tunnel()
@@ -106,11 +115,19 @@ class TunnelChain(object):
             tunn = tunnel.TCPTunnel(stream, None, tunnel_address)
             await tunn.connect()
             self._tunnel_list.append(tunn)
+            if tunnel_urls[0].protocol == "tcp" and not tunnel_urls[0].host:
+                # Avoid duplicated tcp tunnel
+                tunnel_urls = tunnel_urls[1:]
         else:
             utils.logger.info(
-                '[%s] Found cached tunnel %s to %s:%d' %
-                (self.__class__.__name__, tunnel_urls[cached_tunnel_index],
-                 address[0], address[1]))
+                "[%s] Found cached tunnel %s to %s:%d"
+                % (
+                    self.__class__.__name__,
+                    tunnel_urls[cached_tunnel_index],
+                    address[0],
+                    address[1],
+                )
+            )
             tunnel_urls = tunnel_urls[cached_tunnel_index:]
             tunn = None
 
@@ -118,8 +135,9 @@ class TunnelChain(object):
         for i, url in enumerate(tunnel_urls):
             tunnel_class = registry.tunnel_registry[url.protocol]
             if not tunnel_class:
-                raise utils.TunnelError('%s tunnel not registered' %
-                                        url.protocol.upper())
+                raise utils.TunnelError(
+                    "%s tunnel not registered" % url.protocol.upper()
+                )
             next_address = address
             if i < len(tunnel_urls) - 1:
                 next_url = tunnel_urls[i + 1]
@@ -129,14 +147,22 @@ class TunnelChain(object):
 
             time0 = time.time()
             if not await tunn.connect():
-                raise utils.TunnelConnectError('Create %s to %s:%d failed' %
-                                               (tunn, address[0], address[1]))
-            utils.logger.debug('[%s][%.3f] Tunnel to %s established' %
-                               (self.__class__.__name__,
-                                (time.time() - time0), url))
-        utils.logger.info('[%s][%.3f] Create tunnel to %s:%d success' %
-                          (self.__class__.__name__,
-                           (time.time() - time_start), address[0], address[1]))
+                raise utils.TunnelConnectError(
+                    "Create %s to %s:%d failed" % (tunn, address[0], address[1])
+                )
+            utils.logger.debug(
+                "[%s][%.3f] Tunnel to %s established"
+                % (self.__class__.__name__, (time.time() - time0), url)
+            )
+        utils.logger.info(
+            "[%s][%.3f] Create tunnel to %s:%d success"
+            % (
+                self.__class__.__name__,
+                (time.time() - time_start),
+                address[0],
+                address[1],
+            )
+        )
 
     def close(self):
         tunnel = self.tail
