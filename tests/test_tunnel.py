@@ -47,3 +47,18 @@ async def test_ssl_tunnel():
     buffer = await tunn.read()
     assert buffer == data
     server.stop()
+
+
+@pytest.mark.asyncio
+async def test_fork_tunnel():
+    server = DemoTCPServer()
+    port = get_random_port()
+    server.listen(port)
+    s = socket.socket()
+    tunn = tunnel.TCPTunnel(s, address=("127.0.0.1", port))
+    fork_tunn = await tunn.fork()
+    data = b"Hello world\n"
+    await fork_tunn.write(data)
+    buffer = await fork_tunn.read()
+    assert buffer == data
+    server.stop()
