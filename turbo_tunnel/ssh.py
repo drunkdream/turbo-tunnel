@@ -9,6 +9,7 @@ import shlex
 import socket
 import struct
 import sys
+import time
 
 import asyncssh
 
@@ -422,6 +423,17 @@ class SSHTunnel(tunnel.Tunnel):
             self._writer.write_eof()
             self._writer = None
         self._reader = None
+
+    async def fork(self):
+        time0 = time.time()
+        tunnel = self.__class__(self._tunnel, self._url, (self._addr, self._port))
+        if await tunnel.connect():
+            utils.logger.info(
+                "[%s][%.3f] %s fork success"
+                % (self.__class__.__name__, (time.time() - time0), tunnel)
+            )
+            return tunnel
+        return None
 
 
 registry.tunnel_registry.register("ssh", SSHTunnel)

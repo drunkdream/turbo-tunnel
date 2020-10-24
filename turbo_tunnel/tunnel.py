@@ -32,8 +32,12 @@ class Tunnel(utils.IStream):
 
     def __str__(self):
         address = self._url
-        if not address:
-            address = "%s:%d" % (self._addr, self._port)
+        if not address or not address.host:
+            if address:
+                address = str(address)
+            else:
+                address = ""
+            address += "%s:%d" % (self._addr, self._port)
         return "%s %s" % (self.__class__.__name__, address)
 
     @classmethod
@@ -80,6 +84,18 @@ class Tunnel(utils.IStream):
                 break
         else:
             raise utils.TimeoutError("Wait for connecting timeout")
+
+    async def fork(self):
+        time0 = time.time()
+        tunnel = await self._tunnel.fork()
+        tunnel = self.__class__(tunnel, self._url, (self._addr, self._port))
+        if await tunnel.connect():
+            utils.logger.info(
+                "[%s][%.3f] %s fork success"
+                % (self.__class__.__name__, (time.time() - time0), tunnel)
+            )
+            return tunnel
+        return None
 
 
 class TCPTunnel(Tunnel):
@@ -144,9 +160,11 @@ class TCPTunnel(Tunnel):
             try:
                 return await self._stream.connect((self._addr, self._port))
             except tornado.iostream.StreamClosedError:
-                raise utils.TunnelConnectError(
-                    "Connect %s:%d failed" % (self._addr, self._port)
+                utils.logger.warn(
+                    "[%s] Connect %s:%d failed"
+                    % (self.__class__.__name__, self._addr, self._port)
                 )
+                return False
         return True
 
     async def read(self):
@@ -209,6 +227,28 @@ class TCPTunnel(Tunnel):
             self._tunnel.close()
             self._tunnel = None
             utils.logger.debug(message)
+
+    async def fork(self):
+        if self._server_side:
+            raise NotImplementedError("Serverside tunnel fork not supported")
+        tunnel = None
+        time0 = time.time()
+        if self._stream:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+            tunnel = tornado.iostream.IOStream(s)
+        else:
+            tunnel = await self._tunnel.fork()
+        if not tunnel:
+            return None
+
+        tunnel = self.__class__(tunnel, self._url, (self._addr, self._port))
+        if await tunnel.connect():
+            utils.logger.info(
+                "[%s][%.3f] %s fork success"
+                % (self.__class__.__name__, (time.time() - time0), tunnel)
+            )
+            return tunnel
+        return None
 
 
 class TunnelIOStream(tornado.iostream.BaseIOStream):
