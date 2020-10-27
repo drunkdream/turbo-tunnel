@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-'''Tunnel configuration
-'''
+"""Tunnel configuration
+"""
 
 import asyncio
 import fnmatch
@@ -14,14 +14,13 @@ from . import utils
 
 class Tunnel(object):
     def __init__(self, tunnel):
-        self._id = tunnel['id']
-        self._url = utils.Url(tunnel['url'])
-        self._is_default = tunnel.get('default', False)
-        self._dependency = tunnel.get('dependency', None)
+        self._id = tunnel["id"]
+        self._url = utils.Url(tunnel["url"])
+        self._is_default = tunnel.get("default", False)
+        self._dependency = tunnel.get("dependency", None)
 
     def __str__(self):
-        return '<Tunnel object id=%s url=%s at 0x%.x>' % (self._id, self._url,
-                                                          id(self))
+        return "<Tunnel object id=%s url=%s at 0x%.x>" % (self._id, self._url, id(self))
 
     @property
     def id(self):
@@ -52,22 +51,26 @@ class Tunnel(object):
         return self._is_default
 
     def is_blocked(self):
-        return self._url.protocol == 'block'
+        return self._url.protocol == "block"
 
 
 class TunnelRule(object):
     def __init__(self, rule):
-        self._id = rule['id']
-        self._priority = rule.get('priority', 0)
-        self._addr_list = rule.get('addr', '*').split(';')
-        self._port_list = rule.get('port', '1-65535')
+        self._id = rule["id"]
+        self._priority = rule.get("priority", 0)
+        self._addr_list = rule.get("addr", "*").split(";")
+        self._port_list = rule.get("port", "1-65535")
         if isinstance(self._port_list, int):
             self._port_list = str(self._port_list)
-        self._port_list = self._port_list.split(';')
-        self._tunnel = rule['tunnel']
+        self._port_list = self._port_list.split(";")
+        self._tunnel = rule["tunnel"]
 
     def __str__(self):
-        return '<TunnelRule object id=%s priority=%d at 0x%x>' % (self._id, self._priority, id(self))
+        return "<TunnelRule object id=%s priority=%d at 0x%x>" % (
+            self._id,
+            self._priority,
+            id(self),
+        )
 
     @property
     def id(self):
@@ -103,8 +106,8 @@ class TunnelRule(object):
             port_str = port_str.strip()
             if port_str.isdigit() and int(port_str) == port:
                 return True
-            elif '-' in port_str:
-                port_start, port_end = port_str.split('-')
+            elif "-" in port_str:
+                port_start, port_end = port_str.split("-")
                 port_start = int(port_start)
                 port_end = int(port_end)
                 if port >= port_start and port <= port_end:
@@ -113,15 +116,15 @@ class TunnelRule(object):
 
 
 class TunnelConfiguration(object):
-    '''Tunnel Configuration
-    '''
+    """Tunnel Configuration
+    """
+
     reload_interval = 1
 
     def __init__(self, conf_file, auto_reload=False):
         self._conf_file = conf_file
         if not os.path.exists(self._conf_file):
-            raise RuntimeError('Configuration file %s not exist' %
-                               self._conf_file)
+            raise RuntimeError("Configuration file %s not exist" % self._conf_file)
         self._auto_reload = auto_reload
         self._last_modified = None
         self.load()
@@ -139,44 +142,43 @@ class TunnelConfiguration(object):
             try:
                 return yaml.safe_load(text)
             except:
-                utils.logger.warn('[%s] Ignore invalid config file' %
-                                  self.__class__.__name__)
+                utils.logger.warn(
+                    "[%s] Ignore invalid config file" % self.__class__.__name__
+                )
                 return None
 
     def load(self):
         if not os.path.exists(self._conf_file):
-            utils.logger.warn('[%s] Config file not exist' %
-                              self.__class__.__name__)
+            utils.logger.warn("[%s] Config file not exist" % self.__class__.__name__)
             return
         last_modified = os.path.getmtime(self._conf_file)
         if not self._last_modified or last_modified > self._last_modified:
             if self._last_modified:
-                utils.logger.info('[%s] Reload config file' %
-                                  self.__class__.__name__)
+                utils.logger.info("[%s] Reload config file" % self.__class__.__name__)
             config = self.parse()
             if not config:
                 return
             self._conf_obj = config
-            if not self._conf_obj.get('version'):
-                raise utils.ConfigError('Field `version` not found')
-            elif not self._conf_obj.get('listen'):
-                raise utils.ConfigError('Field `listen` not found')
+            if not self._conf_obj.get("version"):
+                raise utils.ConfigError("Field `version` not found")
+            elif not self._conf_obj.get("listen"):
+                raise utils.ConfigError("Field `listen` not found")
 
             self._tunnels = []
-            for tunnel in self._conf_obj.get('tunnels', []):
+            for tunnel in self._conf_obj.get("tunnels", []):
                 self._tunnels.append(Tunnel(tunnel))
             self._rules = []
-            for rule in self._conf_obj.get('rules', []):
+            for rule in self._conf_obj.get("rules", []):
                 self._rules.append(TunnelRule(rule))
             self._last_modified = last_modified
 
     @property
     def version(self):
-        return self._conf_obj['version']
+        return self._conf_obj["version"]
 
     @property
     def listen_url(self):
-        return self._conf_obj['listen']
+        return self._conf_obj["listen"]
 
     @property
     def rules(self):
@@ -199,4 +201,4 @@ class TunnelConfiguration(object):
                     tunnel.dependency = depend_tunnel
                 return tunnel
         else:
-            raise RuntimeError('Tunnel %s not found' % id)
+            raise RuntimeError("Tunnel %s not found" % id)
