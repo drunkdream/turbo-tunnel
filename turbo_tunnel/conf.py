@@ -170,6 +170,18 @@ class TunnelConfiguration(object):
             self._rules = []
             for rule in self._conf_obj.get("rules", []):
                 self._rules.append(TunnelRule(rule))
+            for plugin in self._conf_obj.get("plugins", []):
+                for module in ("turbo_tunnel.plugins.%s" % plugin, plugin):
+                    try:
+                        __import__(module)
+                    except ImportError:
+                        pass
+                    else:
+                        break
+                else:
+                    utils.logger.error(
+                        "[%s] Load plugin %s failed" % (self.__class__.__name__, plugin)
+                    )
             self._last_modified = last_modified
 
     @property
