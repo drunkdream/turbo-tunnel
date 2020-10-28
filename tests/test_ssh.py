@@ -43,7 +43,6 @@ class TestSSHServer(object):
             self.server.close()
             self.server = None
 
-    @pytest.mark.asyncio
     async def test_invalid_password(self):
         await self.ensure_start_server()
         options = {
@@ -60,7 +59,6 @@ class TestSSHServer(object):
             )
         self.ensure_stop_server()
 
-    @pytest.mark.asyncio
     async def test_exec_command(self):
         if sys.platform == "win32":
             # Ignore on windows currently
@@ -78,11 +76,10 @@ class TestSSHServer(object):
             options=options,
         ) as conn:
             message = "Hello ssh!"
-            result = await conn.run('echo "%s"' % message) # , check=True
+            result = await conn.run('echo "%s"' % message)  # , check=True
             # assert result.stdout.strip() == message
         self.ensure_stop_server()
 
-    @pytest.mark.asyncio
     async def test_tcp_forward(self):
         await self.ensure_start_server()
         server = DemoTCPServer()
@@ -132,7 +129,6 @@ class TestSSHTunnel(object):
             await asyncio.sleep(1)
             self._server_started = True
 
-    @pytest.mark.asyncio
     async def test_tcp_forward(self):
         await self.ensure_start_server()
         server1 = DemoTCPServer()
@@ -150,7 +146,6 @@ class TestSSHTunnel(object):
         buffer = await ssh_tunn.read()
         assert buffer.strip() == message
 
-    @pytest.mark.asyncio
     async def test_fork_tunnel(self):
         await self.ensure_start_server()
         server1 = DemoTCPServer()

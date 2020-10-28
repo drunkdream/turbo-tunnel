@@ -5,14 +5,11 @@ import random
 import socket
 import ssl
 
-import pytest
-
 from turbo_tunnel import tunnel, utils
 
 from .util import DemoTCPServer, get_random_port
 
 
-@pytest.mark.asyncio
 async def test_tcp_tunnel():
     server = DemoTCPServer()
     port = get_random_port()
@@ -27,7 +24,6 @@ async def test_tcp_tunnel():
     server.stop()
 
 
-@pytest.mark.asyncio
 async def test_ssl_tunnel():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
@@ -49,7 +45,6 @@ async def test_ssl_tunnel():
     server.stop()
 
 
-@pytest.mark.asyncio
 async def test_fork_tunnel():
     server = DemoTCPServer()
     port = get_random_port()
