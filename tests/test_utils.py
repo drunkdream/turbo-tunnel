@@ -6,7 +6,6 @@ import asyncio
 import random
 import socket
 
-import pytest
 import tornado
 
 from turbo_tunnel import utils
@@ -40,7 +39,6 @@ def test_url():
     assert url.port == 22
 
 
-@pytest.mark.asyncio
 async def test_async_task_manager():
     async def task():
         await asyncio.sleep(2)
@@ -56,7 +54,6 @@ async def test_async_task_manager():
     assert len(async_task_mgr.running_tasks) == curr_tasks
 
 
-@pytest.mark.asyncio
 async def test_wait_for_tasks():
     async def task1():
         await asyncio.sleep(2)
