@@ -121,6 +121,11 @@ def main():
     if args.retry:
         server.TunnelServer.retry_count = args.retry
 
+    if sys.platform == 'win32' and sys.version_info[1] >= 8:
+        # on Windows, the default asyncio event loop is ProactorEventLoop from python3.8
+        loop = asyncio.SelectorEventLoop()
+        asyncio.set_event_loop(loop)
+
     tunnel_server.start()
     try:
         tornado.ioloop.IOLoop.current().start()
