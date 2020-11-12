@@ -1,0 +1,63 @@
+
+name: Create Release and Upload Asset
+
+on:
+  push:
+    # Sequence of patterns matched against refs/tags
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+jobs:
+  release:
+    name: Create Release ${{ github.ref }}
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+  build:
+    name: Build on ${{ matrix.os }}
+    needs: release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      max-parallel: 3
+      matrix:
+        python-version: [3.7]
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v1
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Dependencies
+        run: |
+          python -V
+          python -m pip install --upgrade pip pyinstaller
+          pip install -r requirements.txt
+      - name: Build binary file
+        id: build_binary
+        run: |
+          python build.py
+          cd dist
+          python -m zipfile -c "../turbo-tunnel.zip" .
+          python -c "print('::set-output name=arch::%s-%s' % (__import__('sys').platform, __import__('platform').machine().lower()))"
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+          asset_path: turbo-tunnel.zip
+          asset_name: turbo-tunnel-${{ steps.build_binary.outputs.arch }}.zip
+          asset_content_type: application/zip

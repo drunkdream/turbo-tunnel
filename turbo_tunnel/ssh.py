@@ -320,7 +320,7 @@ class SSHTunnel(tunnel.Tunnel):
         key = "%s:%d" % url.address
         if key in cls.ssh_conns:
             conn = cls.ssh_conns[key]
-            if conn._transport.closed():
+            if not conn._transport or conn._transport.closed():
                 utils.logger.warn(
                     "[%s] SSH connection %s closed, remove cache" % (cls.__name__, key)
                 )
