@@ -53,7 +53,7 @@ VSVersionInfo(
 
 
 def build_by_pyinstaller(platform, version):
-    os.system("pip install pyinstaller")
+    os.system("python3 -m pip install pyinstaller")
     version_items = version.split(".")
     for i in range(len(version_items)):
         version_items[i] = int(version_items[i])
@@ -84,18 +84,18 @@ if __name__ == "__main__":
         }
         with open(version_file, "w") as fp:
             fp.write(text)
-        cmdline = "pyinstaller -F -c %s -n turbo-tunnel --version-file %s" % (
+        cmdline = "python3 -m PyInstaller -F -c %s -n turbo-tunnel --version-file %s" % (
             main_file,
             version_file,
         )
     else:
-        cmdline = "pyinstaller -F -w %s -n turbo-tunnel" % main_file
+        cmdline = "python3 -m PyInstaller -F -w %s -n turbo-tunnel" % main_file
 
     os.system(cmdline)
 
 
 def build(backend):
-    os.system("pip install -r requirements.txt")
+    os.system("python3 -m pip install -r requirements.txt")
     import turbo_tunnel
 
     platform = "win32"
