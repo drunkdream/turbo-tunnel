@@ -29,6 +29,7 @@ class Tunnel(utils.IStream):
             self._addr, self._port = url.host, url.port
         self._running = True
         self._connected = False
+        self._buffer = b""
 
     def __str__(self):
         address = self._url
@@ -56,6 +57,13 @@ class Tunnel(utils.IStream):
 
     def closed(self):
         return self._tunnel.closed()
+
+    async def readline(self):
+        while b"\n" not in self._buffer:
+            self._buffer += await self.read()
+
+        buffer, self._buffer = self._buffer.split(b"\n", 1)
+        return buffer + b"\n"
 
     def on_read(self, buffer):
         utils.logger.debug(
