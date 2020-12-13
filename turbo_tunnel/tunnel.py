@@ -306,6 +306,24 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
                 self._buffer = b""
                 return buffer
 
+    async def read_until(self, delimiter, max_bytes=None):
+        while True:
+            if not self._buffer:
+                if not self._tunnel:
+                    assert not self._buffer
+                    raise tornado.iostream.StreamClosedError()
+                if self._read_event.is_set():
+                    self._read_event.clear()
+                await self._read_event.wait()
+
+            if not self._buffer:
+                raise tornado.iostream.StreamClosedError()
+            pos = self._buffer.find(delimiter)
+            if pos >= 0:
+                buffer = self._buffer[: pos + len(delimiter)]
+                self._buffer = self._buffer[pos + len(delimiter) :]
+                return buffer
+
     async def read_until_regex(self, regex, max_bytes=None):
         read_regex = re.compile(regex)
         while True:
@@ -478,6 +496,7 @@ class TunnelTransport(asyncio.Transport):
         super(TunnelTransport, self).__init__()
         self._tunnel = tunnel
         self._protocol = protocol
+        assert self._tunnel.socket is not None
         self._extra["socket"] = self._tunnel.socket
         self._extra["sockname"] = self._tunnel.socket.getsockname()
         self._extra["peername"] = self._tunnel.socket.getpeername()
@@ -524,6 +543,52 @@ class TunnelTransport(asyncio.Transport):
                 self._protocol.data_received(buffer)
             else:
                 break
+
+
+def patch_tcp_client(tunn, verify_ssl=None, server_hostname=None):
+    TCPClient = tornado.tcpclient.TCPClient
+
+    async def connect(
+        tcp_client,
+        host,
+        port,
+        af=socket.AF_UNSPEC,
+        ssl_options=None,
+        max_buffer_size=None,
+        source_ip=None,
+        source_port=None,
+        timeout=None,
+    ):
+        tun = tunn
+        if ssl_options is not None:
+            tun = SSLTunnel(
+                tun,
+                sslcontext=ssl_options,
+                verify_ssl=verify_ssl and verify_ssl != "false",
+                server_hostname=server_hostname or host,
+            )
+            await tun.connect()
+        stream = TunnelIOStream(tun)
+        return stream
+
+    class TCPClientPatchContext(object):
+        def __init__(self, patched_connect):
+            self._origin_connect = TCPClient.connect
+            self._patched_connect = patched_connect
+
+        def patch(self):
+            TCPClient.connect = self._patched_connect
+
+        def unpatch(self):
+            TCPClient.connect = self._origin_connect
+
+        def __enter__(self):
+            self.patch()
+
+        def __exit__(self, exc_type, exc_value, exc_trackback):
+            self.unpatch()
+
+    return TCPClientPatchContext(connect)
 
 
 registry.tunnel_registry.register("tcp", TCPTunnel)
