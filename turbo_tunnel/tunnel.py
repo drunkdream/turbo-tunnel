@@ -39,7 +39,7 @@ class Tunnel(utils.IStream):
             else:
                 address = ""
             address += "%s:%d" % (self._addr, self._port)
-        return "%s %s" % (self.__class__.__name__, address)
+        return "%s [%x]%s" % (self.__class__.__name__, id(self), address)
 
     @classmethod
     def has_cache(cls, url):
@@ -262,7 +262,18 @@ class TCPTunnel(Tunnel):
 class TunnelIOStream(tornado.iostream.BaseIOStream):
     """Tunnel to IOStream"""
 
-    def __init__(self, tunnel):
+    streams = {}
+
+    def __new__(cls, tunnel):
+        if tunnel not in cls.streams:
+            instance = object.__new__(cls)
+            instance.__init__(tunnel, True)
+            cls.streams[tunnel] = instance
+        return cls.streams[tunnel]
+
+    def __init__(self, tunnel, real_init=False):
+        if not real_init:
+            return
         super(TunnelIOStream, self).__init__()
         self._tunnel = tunnel
         self._buffer = b""
@@ -545,11 +556,8 @@ class TunnelTransport(asyncio.Transport):
                 break
 
 
-def patch_tcp_client(tunn, verify_ssl=None, server_hostname=None):
-    TCPClient = tornado.tcpclient.TCPClient
-
+def patch_tcp_client(tcp_client, tunn, verify_ssl=None, server_hostname=None):
     async def connect(
-        tcp_client,
         host,
         port,
         af=socket.AF_UNSPEC,
@@ -559,36 +567,23 @@ def patch_tcp_client(tunn, verify_ssl=None, server_hostname=None):
         source_port=None,
         timeout=None,
     ):
-        tun = tunn
-        if ssl_options is not None:
-            tun = SSLTunnel(
-                tun,
-                sslcontext=ssl_options,
-                verify_ssl=verify_ssl and verify_ssl != "false",
-                server_hostname=server_hostname or host,
-            )
-            await tun.connect()
-        stream = TunnelIOStream(tun)
+        if getattr(tcp_client, "_cached_streams", None) is None:
+            tcp_client._cached_streams = {}
+        stream = TunnelIOStream.streams.get(tunn)
+        if stream is None:
+            tun = tunn
+            if ssl_options is not None:
+                tun = SSLTunnel(
+                    tun,
+                    sslcontext=ssl_options,
+                    verify_ssl=verify_ssl and verify_ssl != "false",
+                    server_hostname=server_hostname or host,
+                )
+                await tun.connect()
+            stream = TunnelIOStream(tun)
         return stream
 
-    class TCPClientPatchContext(object):
-        def __init__(self, patched_connect):
-            self._origin_connect = TCPClient.connect
-            self._patched_connect = patched_connect
-
-        def patch(self):
-            TCPClient.connect = self._patched_connect
-
-        def unpatch(self):
-            TCPClient.connect = self._origin_connect
-
-        def __enter__(self):
-            self.patch()
-
-        def __exit__(self, exc_type, exc_value, exc_trackback):
-            self.unpatch()
-
-    return TCPClientPatchContext(connect)
+    tcp_client.connect = connect
 
 
 registry.tunnel_registry.register("tcp", TCPTunnel)
