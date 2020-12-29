@@ -102,11 +102,160 @@ class HTTPSTunnelServer(server.TunnelServer):
 
     def post_init(self):
         this = self
+        self._tunnels = {}
+
+        class EnumHTTPTunnelStatus(object):
+
+            IDLE = 1
+            BUSY = 2
 
         class HTTPServerHandler(tornado.web.RequestHandler):
             """HTTP Server Handler"""
 
-            SUPPORTED_METHODS = ["CONNECT"]
+            SUPPORTED_METHODS = list(tornado.web.RequestHandler.SUPPORTED_METHODS) + [
+                "CONNECT"
+            ]
+
+            async def _get_tunnel(self, address):
+                if address not in this._tunnels:
+                    this._tunnels[address] = []
+                for i in range(len(this._tunnels[address]) - 1, -1, -1):
+                    tunn = this._tunnels[address][i]
+                    if tunn["tunnel"].closed():
+                        utils.logger.info(
+                            "[%s] HTTP tunnel %s closed"
+                            % (self.__class__.__name__, tunn["tunnel"])
+                        )
+                        this._tunnels[address].pop(i)
+                        continue
+                    if tunn["status"] != EnumHTTPTunnelStatus.IDLE:
+                        utils.logger.debug(
+                            "[%s] HTTP tunnel %s is busy"
+                            % (self.__class__.__name__, tunn["tunnel"])
+                        )
+                        continue
+                    utils.logger.info(
+                        "[%s] Use cached tunnel %s to access %s:%d"
+                        % (
+                            self.__class__.__name__,
+                            this._tunnels[address][i]["tunnel"],
+                            address[0],
+                            address[1],
+                        )
+                    )
+                    return this._tunnels[address][i]
+                else:
+                    tunnel_chain = this.create_tunnel_chain()
+                    await tunnel_chain.create_tunnel(address)
+                    tunn = {
+                        "tunnel": tunnel_chain.tail,
+                        "status": EnumHTTPTunnelStatus.IDLE,
+                    }
+                    this._tunnels[address].append(tunn)
+                    return tunn
+
+            async def handle_request(self):
+                s_url = self.request.path
+                utils.logger.debug(
+                    "[%s][%s] %s"
+                    % (self.__class__.__name__, self.request.method.upper(), s_url)
+                )
+                if self.request.query:
+                    s_url += "?" + self.request.query
+                url = utils.Url(s_url)
+
+                try:
+                    tunn = await self._get_tunnel(url.address)
+                except utils.TunnelError as e:
+                    if not isinstance(e, utils.TunnelBlockedError):
+                        utils.logger.warn(
+                            "[%s] Connect %s:%d failed: %s"
+                            % (
+                                self.__class__.__name__,
+                                url.address[0],
+                                url.address[1],
+                                e,
+                            )
+                        )
+                        self.set_status(504)
+                    else:
+                        self.set_status(403)
+                    return
+
+                class _HTTPConnection(tornado.simple_httpclient._HTTPConnection):
+                    def _on_end_request(self):
+                        utils.logger.debug(
+                            "[%s] Ignore close http connection"
+                            % self.__class__.__name__
+                        )
+
+                http_client = tornado.simple_httpclient.SimpleAsyncHTTPClient(
+                    force_instance=True
+                )
+                http_client._connection_class = lambda: _HTTPConnection
+                tunnel.patch_tcp_client(http_client.tcp_client, tunn["tunnel"])
+
+                headers = {}
+                for hdr in self.request.headers:
+                    if hdr == "Proxy-Connection":
+                        if self.request.headers[hdr].lower() == "keep-alive":
+                            headers["Connection"] = "Keep-Alive"
+                    else:
+                        headers[hdr] = self.request.headers[hdr]
+
+                request = tornado.httpclient.HTTPRequest(
+                    s_url,
+                    self.request.method,
+                    headers=headers,
+                    body=self.request.body,
+                    follow_redirects=False,
+                    allow_nonstandard_methods=True,
+                )
+
+                tunn["status"] = EnumHTTPTunnelStatus.BUSY
+                try:
+                    response = await http_client.fetch(request)
+                except tornado.httpclient.HTTPClientError as e:
+                    tunn["status"] = EnumHTTPTunnelStatus.IDLE
+
+                    if e.code == 599:
+                        self.set_status(502)
+                    else:
+                        self.set_status(e.code, e.message)
+                        for hdr in e.response.headers:
+                            if hdr in ("Content-Length",):
+                                continue
+                            elif hdr not in ("Transfer-Encoding",):
+                                self.set_header(hdr, e.response.headers[hdr])
+                        if e.response.body:
+                            self.write(e.response.body)
+                else:
+                    tunn["status"] = EnumHTTPTunnelStatus.IDLE
+                    for hdr in response.headers:
+                        if hdr in ("Content-Length",):
+                            continue
+                        elif hdr not in ("Transfer-Encoding",):
+                            self.set_header(hdr, response.headers[hdr])
+                    if response.body:
+                        self.write(response.body)
+
+            async def get(self):
+                return await self.handle_request()
+
+            async def head(self):
+                return await self.handle_request()
+
+            async def options(self):
+                return await self.handle_request()
+
+            async def patch(self):
+                return await self.handle_request()
+
+            async def post(self):
+                return await self.handle_request()
+
+            async def put(self):
+                return await self.handle_request()
 
             async def connect(self):
                 address = self.request.path.split(":")
@@ -199,6 +348,7 @@ class HTTPSTunnelServer(server.TunnelServer):
 
         handlers = [
             (["CONNECT"], r"", HTTPServerHandler),
+            (["*"], r".*", HTTPServerHandler),
         ]
         app = tornado.web.Application()
         router = HTTPRouter(app, handlers)
