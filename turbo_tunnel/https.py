@@ -156,13 +156,16 @@ class HTTPSTunnelServer(server.TunnelServer):
 
             async def handle_request(self):
                 s_url = self.request.path
+                if self.request.query:
+                    s_url += "?" + self.request.query
                 utils.logger.debug(
                     "[%s][%s] %s"
                     % (self.__class__.__name__, self.request.method.upper(), s_url)
                 )
-                if self.request.query:
-                    s_url += "?" + self.request.query
                 url = utils.Url(s_url)
+                if url.protocol != "http" or not url.host:
+                    self.set_status(400)
+                    return
 
                 try:
                     tunn = await self._get_tunnel(url.address)
