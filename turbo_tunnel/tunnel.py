@@ -544,6 +544,9 @@ class TunnelTransport(asyncio.Transport):
     def closed(self):
         return not self._tunnel or self._tunnel.closed()
 
+    def is_closing(self):
+        return self.closed()
+
     async def transfer_data_task(self):
         while self._tunnel:
             try:
