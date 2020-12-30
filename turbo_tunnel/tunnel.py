@@ -29,6 +29,7 @@ class Tunnel(utils.IStream):
             self._addr, self._port = url.host, url.port
         self._running = True
         self._connected = False
+        self._buffer = b""
 
     def __str__(self):
         address = self._url
@@ -38,7 +39,7 @@ class Tunnel(utils.IStream):
             else:
                 address = ""
             address += "%s:%d" % (self._addr, self._port)
-        return "%s %s" % (self.__class__.__name__, address)
+        return "%s [%x]%s" % (self.__class__.__name__, id(self), address)
 
     @classmethod
     def has_cache(cls, url):
@@ -56,6 +57,13 @@ class Tunnel(utils.IStream):
 
     def closed(self):
         return self._tunnel.closed()
+
+    async def readline(self):
+        while b"\n" not in self._buffer:
+            self._buffer += await self.read()
+
+        buffer, self._buffer = self._buffer.split(b"\n", 1)
+        return buffer + b"\n"
 
     def on_read(self, buffer):
         utils.logger.debug(
@@ -254,7 +262,18 @@ class TCPTunnel(Tunnel):
 class TunnelIOStream(tornado.iostream.BaseIOStream):
     """Tunnel to IOStream"""
 
-    def __init__(self, tunnel):
+    streams = {}
+
+    def __new__(cls, tunnel):
+        if tunnel not in cls.streams:
+            instance = object.__new__(cls)
+            instance.__init__(tunnel, True)
+            cls.streams[tunnel] = instance
+        return cls.streams[tunnel]
+
+    def __init__(self, tunnel, real_init=False):
+        if not real_init:
+            return
         super(TunnelIOStream, self).__init__()
         self._tunnel = tunnel
         self._buffer = b""
@@ -296,6 +315,24 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
             elif partial and self._buffer:
                 buffer = self._buffer
                 self._buffer = b""
+                return buffer
+
+    async def read_until(self, delimiter, max_bytes=None):
+        while True:
+            if not self._buffer:
+                if not self._tunnel:
+                    assert not self._buffer
+                    raise tornado.iostream.StreamClosedError()
+                if self._read_event.is_set():
+                    self._read_event.clear()
+                await self._read_event.wait()
+
+            if not self._buffer:
+                raise tornado.iostream.StreamClosedError()
+            pos = self._buffer.find(delimiter)
+            if pos >= 0:
+                buffer = self._buffer[: pos + len(delimiter)]
+                self._buffer = self._buffer[pos + len(delimiter) :]
                 return buffer
 
     async def read_until_regex(self, regex, max_bytes=None):
@@ -470,6 +507,7 @@ class TunnelTransport(asyncio.Transport):
         super(TunnelTransport, self).__init__()
         self._tunnel = tunnel
         self._protocol = protocol
+        assert self._tunnel.socket is not None
         self._extra["socket"] = self._tunnel.socket
         self._extra["sockname"] = self._tunnel.socket.getsockname()
         self._extra["peername"] = self._tunnel.socket.getpeername()
@@ -506,6 +544,9 @@ class TunnelTransport(asyncio.Transport):
     def closed(self):
         return not self._tunnel or self._tunnel.closed()
 
+    def is_closing(self):
+        return self.closed()
+
     async def transfer_data_task(self):
         while self._tunnel:
             try:
@@ -516,6 +557,36 @@ class TunnelTransport(asyncio.Transport):
                 self._protocol.data_received(buffer)
             else:
                 break
+
+
+def patch_tcp_client(tcp_client, tunn, verify_ssl=None, server_hostname=None):
+    async def connect(
+        host,
+        port,
+        af=socket.AF_UNSPEC,
+        ssl_options=None,
+        max_buffer_size=None,
+        source_ip=None,
+        source_port=None,
+        timeout=None,
+    ):
+        if getattr(tcp_client, "_cached_streams", None) is None:
+            tcp_client._cached_streams = {}
+        stream = TunnelIOStream.streams.get(tunn)
+        if stream is None:
+            tun = tunn
+            if ssl_options is not None:
+                tun = SSLTunnel(
+                    tun,
+                    sslcontext=ssl_options,
+                    verify_ssl=verify_ssl and verify_ssl != "false",
+                    server_hostname=server_hostname or host,
+                )
+                await tun.connect()
+            stream = TunnelIOStream(tun)
+        return stream
+
+    tcp_client.connect = connect
 
 
 registry.tunnel_registry.register("tcp", TCPTunnel)

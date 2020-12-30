@@ -227,6 +227,11 @@ class IStream(object):
             "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
         )
 
+    async def readline(self):
+        raise NotImplementedError(
+            "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)
+        )
+
     async def read_until(self, delimiter, timeout=None):
         raise NotImplementedError(
             "%s.%s" % (self.__class__.__name__, inspect.currentframe().f_code.co_name)

@@ -11,7 +11,31 @@ from turbo_tunnel import https
 from turbo_tunnel import tunnel
 from turbo_tunnel import utils
 
-from .util import DemoTCPServer, get_random_port
+from .util import DemoTCPServer, get_random_port, start_demo_http_server
+
+
+async def test_http_proxy():
+    port1 = get_random_port()
+    listen_url = "http://127.0.0.1:%d" % port1
+    server1 = https.HTTPSTunnelServer(listen_url, ["tcp://"])
+    server1.start()
+
+    port2 = get_random_port()
+    start_demo_http_server(port2)
+
+    s = socket.socket()
+    tun = tunnel.TCPTunnel(s, address=("127.0.0.1", port1))
+    await tun.connect()
+
+    await tun.write(
+        b"GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n\r\n"
+        % (port2, port1)
+    )
+    rsp = await tun.read()
+    pos = rsp.find(b"\r\n\r\n")
+    assert pos > 0
+    rsp = rsp[pos + 4 :]
+    assert rsp == b"Hello HTTP!"
 
 
 async def test_https_tunnel_server():
