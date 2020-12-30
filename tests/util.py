@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-'''
-'''
+"""
+"""
 
 import random
 import socket
@@ -10,7 +10,6 @@ import tornado.tcpserver
 
 
 class DemoTCPServer(tornado.tcpserver.TCPServer):
-
     def __init__(self, autoclose=False, ssl_options=None):
         super(DemoTCPServer, self).__init__(ssl_options=ssl_options)
         self._autoclose = autoclose
@@ -28,12 +27,27 @@ class DemoTCPServer(tornado.tcpserver.TCPServer):
     async def handle_stream(self, stream, address):
         if not self._stream:
             self._stream = stream
-        buffer = await stream.read_until(b'\n')
+        buffer = await stream.read_until(b"\n")
         await stream.write(buffer)
         if self._autoclose:
             stream.close()
 
-conf_yaml = r'''
+
+def start_demo_http_server(port):
+    print("Start demo http server on port %d" % port)
+
+    class HTTPServerHandler(tornado.web.RequestHandler):
+        async def get(self):
+            self.write(b"Hello HTTP!")
+
+    handlers = [
+        (r".*", HTTPServerHandler),
+    ]
+    app = tornado.web.Application(handlers)
+    app.listen(port)
+
+
+conf_yaml = r"""
 version: 1.0
 
 listen: https://127.0.0.1:6666
@@ -66,17 +80,17 @@ rules:
     addr: "*"
     port: 1-65535
     tunnel: block
-'''
+"""
 
 
 def get_random_port():
     while True:
-      port = random.randint(10000, 65000)
-      s = socket.socket()
-      try:
-          s.bind(('127.0.0.1', port))
-      except:
-          continue
-      else:
-          s.close()
-          return port
+        port = random.randint(10000, 65000)
+        s = socket.socket()
+        try:
+            s.bind(("127.0.0.1", port))
+        except:
+            continue
+        else:
+            s.close()
+            return port
