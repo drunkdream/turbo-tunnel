@@ -220,7 +220,6 @@ class HTTPSTunnelServer(server.TunnelServer):
                     response = await http_client.fetch(request)
                 except tornado.httpclient.HTTPClientError as e:
                     tunn["status"] = EnumHTTPTunnelStatus.IDLE
-
                     if e.code == 599:
                         self.set_status(502)
                     else:
@@ -228,6 +227,9 @@ class HTTPSTunnelServer(server.TunnelServer):
                         for hdr in e.response.headers:
                             if hdr in ("Content-Length",):
                                 continue
+                            elif hdr == "Set-Cookie":
+                                for it in e.response.headers.get_list(hdr):
+                                    self.add_header(hdr, it)
                             elif hdr not in ("Transfer-Encoding",):
                                 self.set_header(hdr, e.response.headers[hdr])
                         if e.response.body:
@@ -237,6 +239,9 @@ class HTTPSTunnelServer(server.TunnelServer):
                     for hdr in response.headers:
                         if hdr in ("Content-Length",):
                             continue
+                        elif hdr == "Set-Cookie":
+                            for it in response.headers.get_list(hdr):
+                                self.add_header(hdr, it)
                         elif hdr not in ("Transfer-Encoding",):
                             self.set_header(hdr, response.headers[hdr])
                     if response.body:
