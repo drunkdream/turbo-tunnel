@@ -56,7 +56,7 @@ class Tunnel(utils.IStream):
         return self._url
 
     def closed(self):
-        return self._tunnel.closed()
+        return not self._tunnel or self._tunnel.closed()
 
     async def readline(self):
         while b"\n" not in self._buffer:
