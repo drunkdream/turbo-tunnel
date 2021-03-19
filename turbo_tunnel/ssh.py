@@ -418,6 +418,9 @@ class SSHTunnel(tunnel.Tunnel):
         else:
             raise utils.TunnelClosedError()
 
+    def closed(self):
+        return self._reader is None or self._writer is None
+
     def close(self):
         if self._writer:
             self._writer.write_eof()
