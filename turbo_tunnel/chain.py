@@ -2,6 +2,7 @@
 """Tunnel Chain
 """
 
+import copy
 import socket
 import time
 
@@ -63,18 +64,19 @@ class TunnelChain(object):
 
         return func_wrapper
 
-    def get_cached_tunnel(self):
-        for i, url in enumerate(self._tunnel_urls[::-1]):
+    def get_cached_tunnel(self, tunnel_urls):
+        for i, url in enumerate(tunnel_urls[::-1]):
             tunnel_class = registry.tunnel_registry[url.protocol]
             if not tunnel_class:
                 raise utils.TunnelError(
                     "%s tunnel not registered" % url.protocol.upper()
                 )
             if tunnel_class.has_cache(url):
-                return len(self._tunnel_urls) - i - 1
+                return len(tunnel_urls) - i - 1
         return -1
 
-    async def create_tunnel(self, address):
+    async def select_tunnel(self, address):
+        tunnel_urls = self._tunnel_urls
         if self._tunnel_router:
             selected_rule, selected_tunnel = await self._tunnel_router.select(address)
             registry.plugin_registry.notify(
@@ -87,28 +89,26 @@ class TunnelChain(object):
                 )
                 raise utils.TunnelBlockedError("%s:%d" % (address))
 
-            self._tunnel_urls = selected_tunnel.urls
+            tunnel_urls = selected_tunnel.urls
             utils.logger.info(
                 "[%s] Select tunnel [%s] %s to access %s:%d"
                 % (
                     self.__class__.__name__,
                     selected_rule,
-                    ", ".join([str(url) for url in self._tunnel_urls]),
+                    ", ".join([str(url) for url in tunnel_urls]),
                     address[0],
                     address[1],
                 )
             )
+        return copy.deepcopy(tunnel_urls)
 
+    async def create_tunnel(self, address, tunnel_urls=None):
+        tunnel_urls = tunnel_urls or await self.select_tunnel(address)
         tunnel_address = address
-        if (
-            self._tunnel_urls
-            and self._tunnel_urls[0].host
-            and self._tunnel_urls[0].port
-        ):
-            tunnel_address = (self._tunnel_urls[0].host, self._tunnel_urls[0].port)
+        if tunnel_urls and tunnel_urls[0].host and tunnel_urls[0].port:
+            tunnel_address = (tunnel_urls[0].host, tunnel_urls[0].port)
 
-        tunnel_urls = self._tunnel_urls[:]
-        cached_tunnel_index = self.get_cached_tunnel()
+        cached_tunnel_index = self.get_cached_tunnel(tunnel_urls)
         if cached_tunnel_index < 0:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
             stream = tornado.iostream.IOStream(s)

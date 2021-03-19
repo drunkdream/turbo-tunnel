@@ -119,40 +119,47 @@ class HTTPSTunnelServer(server.TunnelServer):
             async def _get_tunnel(self, address):
                 if address not in this._tunnels:
                     this._tunnels[address] = []
-                for i in range(len(this._tunnels[address]) - 1, -1, -1):
-                    tunn = this._tunnels[address][i]
-                    if tunn["tunnel"].closed():
+                force_instance = False
+                tunnel_chain = this.create_tunnel_chain()
+                tunnel_urls = await tunnel_chain.select_tunnel(address)
+                if tunnel_urls and tunnel_urls[-1].protocol == "http":
+                    tunnel_urls[-1].protocol = "tcp"  # request as http proxy
+                    force_instance = True
+
+                if not force_instance:
+                    for i in range(len(this._tunnels[address]) - 1, -1, -1):
+                        tunn = this._tunnels[address][i]
+                        if tunn["tunnel"].closed():
+                            utils.logger.info(
+                                "[%s] HTTP tunnel %s closed"
+                                % (self.__class__.__name__, tunn["tunnel"])
+                            )
+                            this._tunnels[address].pop(i)
+                            continue
+                        if tunn["status"] != EnumHTTPTunnelStatus.IDLE:
+                            utils.logger.debug(
+                                "[%s] HTTP tunnel %s is busy"
+                                % (self.__class__.__name__, tunn["tunnel"])
+                            )
+                            continue
                         utils.logger.info(
-                            "[%s] HTTP tunnel %s closed"
-                            % (self.__class__.__name__, tunn["tunnel"])
+                            "[%s] Use cached tunnel %s to access %s:%d"
+                            % (
+                                self.__class__.__name__,
+                                this._tunnels[address][i]["tunnel"],
+                                address[0],
+                                address[1],
+                            )
                         )
-                        this._tunnels[address].pop(i)
-                        continue
-                    if tunn["status"] != EnumHTTPTunnelStatus.IDLE:
-                        utils.logger.debug(
-                            "[%s] HTTP tunnel %s is busy"
-                            % (self.__class__.__name__, tunn["tunnel"])
-                        )
-                        continue
-                    utils.logger.info(
-                        "[%s] Use cached tunnel %s to access %s:%d"
-                        % (
-                            self.__class__.__name__,
-                            this._tunnels[address][i]["tunnel"],
-                            address[0],
-                            address[1],
-                        )
-                    )
-                    return this._tunnels[address][i]
-                else:
-                    tunnel_chain = this.create_tunnel_chain()
-                    await tunnel_chain.create_tunnel(address)
-                    tunn = {
-                        "tunnel": tunnel_chain.tail,
-                        "status": EnumHTTPTunnelStatus.IDLE,
-                    }
-                    this._tunnels[address].append(tunn)
-                    return tunn
+                        return this._tunnels[address][i]
+
+                await tunnel_chain.create_tunnel(address, tunnel_urls)
+                tunn = {
+                    "tunnel": tunnel_chain.tail,
+                    "status": EnumHTTPTunnelStatus.IDLE,
+                }
+                this._tunnels[address].append(tunn)
+                return tunn
 
             async def handle_request(self):
                 s_url = self.request.path
