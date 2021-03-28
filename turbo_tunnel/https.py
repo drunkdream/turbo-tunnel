@@ -192,12 +192,34 @@ class HTTPSTunnelServer(server.TunnelServer):
                         self.set_status(403)
                     return
 
+                this = self
+
                 class _HTTPConnection(tornado.simple_httpclient._HTTPConnection):
-                    def _on_end_request(self):
-                        utils.logger.debug(
-                            "[%s] Ignore close http connection"
-                            % self.__class__.__name__
-                        )
+                    async def headers_received(self, first_line, headers):
+                        this.set_status(first_line.code, first_line.reason)
+                        this.set_header("Transfer-Encoding", "chunked")
+                        for k, v in headers.get_all():
+                            if k == "Content-Length":
+                                continue
+                            elif k in ("Set-Cookie",):
+                                this.add_header(k, v)
+                            else:
+                                this.set_header(k, v)
+                        this.set_header("Connection", "Close")
+                        this.flush()
+
+                    def data_received(self, chunk):
+                        chunk = b"%x\r\n%b\r\n" % (len(chunk), chunk)
+                        this.write(chunk)
+                        this.flush()
+
+                    def finish(self):
+                        chunk = b"0\r\n\r\n"
+                        this.write(chunk)
+                        this.flush()
+                        # self._release()
+                        # self._on_end_request()
+                        tunn["status"] = EnumHTTPTunnelStatus.IDLE
 
                 http_client = tornado.simple_httpclient.SimpleAsyncHTTPClient(
                     force_instance=True
@@ -205,6 +227,7 @@ class HTTPSTunnelServer(server.TunnelServer):
                 http_client.max_body_size = 500 * 1024 * 1024
                 http_client._connection_class = lambda: _HTTPConnection
                 tunnel.patch_tcp_client(http_client.tcp_client, tunn["tunnel"])
+                tunn["status"] = EnumHTTPTunnelStatus.BUSY
 
                 headers = {}
                 for hdr in self.request.headers:
@@ -224,11 +247,10 @@ class HTTPSTunnelServer(server.TunnelServer):
                     request_timeout=300,
                 )
 
-                tunn["status"] = EnumHTTPTunnelStatus.BUSY
                 try:
                     response = await http_client.fetch(request)
                 except tornado.httpclient.HTTPClientError as e:
-                    tunn["status"] = EnumHTTPTunnelStatus.IDLE
+                    tunn["tunnel"].close()
                     if e.code == 599:
                         self.set_status(502)
                     else:
@@ -243,18 +265,6 @@ class HTTPSTunnelServer(server.TunnelServer):
                                 self.set_header(hdr, e.response.headers[hdr])
                         if e.response.body:
                             self.write(e.response.body)
-                else:
-                    tunn["status"] = EnumHTTPTunnelStatus.IDLE
-                    for hdr in response.headers:
-                        if hdr in ("Content-Length",):
-                            continue
-                        elif hdr == "Set-Cookie":
-                            for it in response.headers.get_list(hdr):
-                                self.add_header(hdr, it)
-                        elif hdr not in ("Transfer-Encoding",):
-                            self.set_header(hdr, response.headers[hdr])
-                    if response.body:
-                        self.write(response.body)
 
             async def get(self):
                 return await self.handle_request()

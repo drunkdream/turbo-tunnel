@@ -35,7 +35,7 @@ async def test_http_proxy():
     pos = rsp.find(b"\r\n\r\n")
     assert pos > 0
     rsp = rsp[pos + 4 :]
-    assert rsp == b"Hello HTTP!"
+    assert rsp == b"b\r\nHello HTTP!\r\n0\r\n\r\n"
 
 
 async def test_https_tunnel_server():
