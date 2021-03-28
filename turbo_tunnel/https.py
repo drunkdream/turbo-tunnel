@@ -41,7 +41,7 @@ class HTTPSTunnel(tunnel.TCPTunnel):
             )
         data += "\r\n"
         await self._tunnel.write(data.encode())
-        buffer = b""
+        buffer = bytearray()
         while True:
             buffer += await self._tunnel.read()
             if buffer.endswith(b"\r\n\r\n"):
@@ -221,6 +221,7 @@ class HTTPSTunnelServer(server.TunnelServer):
                     body=self.request.body,
                     follow_redirects=False,
                     allow_nonstandard_methods=True,
+                    request_timeout=300,
                 )
 
                 tunn["status"] = EnumHTTPTunnelStatus.BUSY
