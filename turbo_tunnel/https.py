@@ -202,6 +202,7 @@ class HTTPSTunnelServer(server.TunnelServer):
                 http_client = tornado.simple_httpclient.SimpleAsyncHTTPClient(
                     force_instance=True
                 )
+                http_client.max_body_size = 500 * 1024 * 1024
                 http_client._connection_class = lambda: _HTTPConnection
                 tunnel.patch_tcp_client(http_client.tcp_client, tunn["tunnel"])
 
