@@ -311,10 +311,14 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
             elif len(self._buffer) >= num_bytes:
                 buffer = self._buffer[:num_bytes]
                 self._buffer = self._buffer[num_bytes:]
+                if isinstance(buffer, bytearray):
+                    buffer = bytes(buffer)
                 return buffer
             elif partial and self._buffer:
                 buffer = self._buffer
                 self._buffer = bytearray()
+                if isinstance(buffer, bytearray):
+                    buffer = bytes(buffer)
                 return buffer
 
     async def read_until(self, delimiter, max_bytes=None):
