@@ -29,7 +29,7 @@ class Tunnel(utils.IStream):
             self._addr, self._port = url.host, url.port
         self._running = True
         self._connected = False
-        self._buffer = b""
+        self._buffer = bytearray()
 
     def __str__(self):
         address = self._url
@@ -276,7 +276,7 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
             return
         super(TunnelIOStream, self).__init__()
         self._tunnel = tunnel
-        self._buffer = b""
+        self._buffer = bytearray()
         self._close_callback = None
         self._read_event = asyncio.Event()
         utils.AsyncTaskManager().start_task(self.transfer_data_task())
@@ -311,10 +311,14 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
             elif len(self._buffer) >= num_bytes:
                 buffer = self._buffer[:num_bytes]
                 self._buffer = self._buffer[num_bytes:]
+                if isinstance(buffer, bytearray):
+                    buffer = bytes(buffer)
                 return buffer
             elif partial and self._buffer:
                 buffer = self._buffer
-                self._buffer = b""
+                self._buffer = bytearray()
+                if isinstance(buffer, bytearray):
+                    buffer = bytes(buffer)
                 return buffer
 
     async def read_until(self, delimiter, max_bytes=None):
@@ -373,7 +377,7 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
         elif len(buf) >= len(self._buffer):
             buf[:] = self._buffer
             read_size = len(self._buffer)
-            self._buffer = b""
+            self._buffer = bytearray()
             return read_size
         else:
             array_size = len(buf)
@@ -393,7 +397,7 @@ class SSLTunnel(Tunnel, asyncio.Protocol):
         def __init__(self, on_connection_made):
             self._on_connection_made = on_connection_made
             self._read_event = asyncio.Event()
-            self._buffer = b""
+            self._buffer = bytearray()
 
         def connection_made(self, transport):
             self._on_connection_made(transport)
@@ -402,7 +406,7 @@ class SSLTunnel(Tunnel, asyncio.Protocol):
             await self._read_event.wait()
             self._read_event.clear()
             buffer = self._buffer
-            self._buffer = b""
+            self._buffer = bytearray()
             return buffer
 
         def data_received(self, buffer):

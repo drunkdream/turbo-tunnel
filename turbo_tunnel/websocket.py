@@ -43,7 +43,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         )
         self._patcher = self._patch_tcp_client(self._tunnel)
         self._patcher.patch()
-        self._buffer = b""
+        self._buffer = bytearray()
         self._read_event = asyncio.Event()
 
     def _patch_tcp_client(self, tunn):
@@ -134,7 +134,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             await self._read_event.wait()
             self._read_event.clear()
         buffer = self._buffer
-        self._buffer = b""
+        self._buffer = bytearray()
         return buffer
 
     async def write(self, buffer):
@@ -181,7 +181,7 @@ class WebSocketTunnel(tunnel.Tunnel):
 class WebSocketDownStream(utils.IStream):
     def __init__(self, handler):
         self._handler = handler
-        self._buffer = b""
+        self._buffer = bytearray()
         self._read_event = asyncio.Event()
 
     def on_recv(self, buffer):
@@ -195,7 +195,7 @@ class WebSocketDownStream(utils.IStream):
             await self._read_event.wait()
             self._read_event.clear()
         buffer = self._buffer
-        self._buffer = b""
+        self._buffer = bytearray()
         return buffer
 
     async def write(self, buffer):

@@ -292,7 +292,7 @@ class AsyncFileDescriptor(object):
         self._loop = asyncio.get_event_loop()
         self._fd = fd
         self._event = asyncio.Event()
-        self._buffer = b""
+        self._buffer = bytearray()
         self._loop.add_reader(self._fd, self.read_callback)
         self._closed = False
 
@@ -306,7 +306,7 @@ class AsyncFileDescriptor(object):
         await self._event.wait()
         self._event.clear()
         buffer = self._buffer
-        self._buffer = b""
+        self._buffer = bytearray()
         return buffer
 
     def write(self, buffer):
