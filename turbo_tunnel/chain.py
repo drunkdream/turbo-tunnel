@@ -104,6 +104,22 @@ class TunnelChain(object):
 
     async def create_tunnel(self, address, tunnel_urls=None):
         tunnel_urls = tunnel_urls or await self.select_tunnel(address)
+        if len(tunnel_urls) > 1:
+            for i in range(len(tunnel_urls) - 2, -1, -1):
+                tunnel_url = tunnel_urls[i]
+                if tunnel_url.protocol == "tcp":
+                    if tunnel_url.host:
+                        utils.logger.error(
+                            "[%s] Invalid tunnel chain: %s"
+                            % (
+                                self.__class__.__name__,
+                                ", ".join([str(url) for url in tunnel_urls]),
+                            )
+                        )
+                        raise utils.TunnelBlockedError("%s:%d" % (address))
+
+                    tunnel_urls.pop(i)  # Ignore internal tcp:// tunnel
+
         tunnel_address = address
         if tunnel_urls and tunnel_urls[0].host and tunnel_urls[0].port:
             tunnel_address = (tunnel_urls[0].host, tunnel_urls[0].port)
