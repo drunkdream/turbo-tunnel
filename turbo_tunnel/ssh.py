@@ -6,6 +6,7 @@ import asyncio
 import ctypes
 import os
 import shlex
+import signal
 import socket
 import struct
 import sys
@@ -439,5 +440,80 @@ class SSHTunnel(tunnel.Tunnel):
         return None
 
 
+class SSHProcessTunnel(SSHTunnel):
+    """SSH Tunnel Over Process StdIn and StdOut"""
+
+    def __init__(self, tunnel, url, address):
+        super(SSHProcessTunnel, self).__init__(tunnel, url, address)
+        self._process = None
+
+    async def _log_stderr(self):
+        while not self.closed():
+            error_line = await self._process.stderr.readline()
+            utils.logger.warn(
+                "[%s][stderr] %s" % (self.__class__.__name__, error_line.decode())
+            )
+
+    async def connect(self):
+        ssh_conn = await self.create_ssh_conn()
+        if not ssh_conn:
+            return False
+        bin_path = self._url.path
+        cmdline = "%s %s %d" % (bin_path, self._addr, self._port)
+        self._process = await ssh_conn.create_process(cmdline, encoding=None)
+        await asyncio.sleep(0.5)
+
+        if self._process.exit_status is not None and self._process.exit_status != 0:
+            utils.logger.error(
+                "[%s] Create process %s failed: [%d]%s"
+                % (
+                    self.__class__.__name__,
+                    cmdline,
+                    self._process.exit_status,
+                    await self._process.stderr.read(),
+                )
+            )
+            return False
+        status_line = await self._process.stderr.readline()
+        if status_line.startswith(b"[OKAY]"):
+            utils.safe_ensure_future(self._log_stderr())
+            return True
+        elif status_line.startswith(b"[FAIL]"):
+            utils.logger.warn(
+                "[%s] Connect %s:%d failed: %s"
+                % (
+                    self.__class__.__name__,
+                    self._addr,
+                    self._port,
+                    status_line.decode(),
+                )
+            )
+            return False
+        else:
+            raise RuntimeError("Unexpected stderr: %s" % status_line.decode())
+
+    async def read(self):
+        if self._process:
+            buffer = await self._process.stdout.read(4096)
+            if buffer:
+                return buffer
+        raise utils.TunnelClosedError()
+
+    async def write(self, buffer):
+        if self._process:
+            return self._process.stdin.write(buffer)
+        else:
+            raise utils.TunnelClosedError()
+
+    def closed(self):
+        return self._process is None
+
+    def close(self):
+        if self._process:
+            self._process.send_signal(signal.SIGINT)
+            self._process = None
+
+
 registry.tunnel_registry.register("ssh", SSHTunnel)
+registry.tunnel_registry.register("ssh+process", SSHProcessTunnel)
 registry.server_registry.register("ssh", SSHTunnelServer)
