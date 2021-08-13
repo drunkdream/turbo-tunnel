@@ -453,6 +453,7 @@ class SSHProcessTunnel(SSHTunnel):
             utils.logger.warn(
                 "[%s][stderr] %s" % (self.__class__.__name__, error_line.decode())
             )
+        self._process = None
 
     async def connect(self):
         ssh_conn = await self.create_ssh_conn()
@@ -506,12 +507,11 @@ class SSHProcessTunnel(SSHTunnel):
             raise utils.TunnelClosedError()
 
     def closed(self):
-        return self._process is None
+        return self._process is None or self._process.exit_status is not None
 
     def close(self):
         if self._process:
-            self._process.send_signal(signal.SIGINT)
-            self._process = None
+            self._process.stdin.write(b"\x03")
 
 
 registry.tunnel_registry.register("ssh", SSHTunnel)
