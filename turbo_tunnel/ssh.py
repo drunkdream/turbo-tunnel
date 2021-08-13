@@ -447,6 +447,10 @@ class SSHProcessTunnel(SSHTunnel):
         super(SSHProcessTunnel, self).__init__(tunnel, url, address)
         self._process = None
 
+    @classmethod
+    def has_cache(cls, url):
+        return False
+
     async def _log_stderr(self):
         while not self.closed():
             error_line = await self._process.stderr.readline()
