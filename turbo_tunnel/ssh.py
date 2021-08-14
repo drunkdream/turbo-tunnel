@@ -454,9 +454,11 @@ class SSHProcessTunnel(SSHTunnel):
     async def _log_stderr(self):
         while not self.closed():
             error_line = await self._process.stderr.readline()
+            error_line = error_line.strip()
             utils.logger.warn(
                 "[%s][stderr] %s" % (self.__class__.__name__, error_line.decode())
             )
+            await asyncio.sleep(0.5)
         self._process = None
 
     async def connect(self):
