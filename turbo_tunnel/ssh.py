@@ -6,7 +6,6 @@ import asyncio
 import ctypes
 import os
 import shlex
-import signal
 import socket
 import struct
 import sys
