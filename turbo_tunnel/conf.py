@@ -126,6 +126,7 @@ class TunnelConfiguration(object):
         if not os.path.exists(self._conf_file):
             raise RuntimeError("Configuration file %s not exist" % self._conf_file)
         self._auto_reload = auto_reload
+        self._conf_obj = None
         self._last_modified = None
         self.load()
         if self._auto_reload:
@@ -142,7 +143,7 @@ class TunnelConfiguration(object):
             try:
                 return yaml.safe_load(text)
             except:
-                utils.logger.warn(
+                utils.logger.exception(
                     "[%s] Ignore invalid config file" % self.__class__.__name__
                 )
                 return None

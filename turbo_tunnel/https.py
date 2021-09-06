@@ -28,7 +28,7 @@ class HTTPSTunnel(tunnel.TCPTunnel):
         return self._tunnel.stream
 
     async def connect(self):
-        data = "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\n" % (
+        data = "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\nProxy-Connection: Keep-Alive\r\n" % (
             self._addr,
             self._port,
             self._addr,
