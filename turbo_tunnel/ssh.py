@@ -385,6 +385,8 @@ class SSHTunnel(tunnel.Tunnel):
                 ssh_conn.abort()
                 await ssh_conn.wait_closed()
                 return None
+            else:
+                ssh_conn.set_keepalive(10)
             self.__class__.ssh_conns[key] = ssh_conn
         return self.__class__.ssh_conns[key]
 
@@ -392,10 +394,9 @@ class SSHTunnel(tunnel.Tunnel):
         ssh_conn = await self.create_ssh_conn()
         if not ssh_conn:
             return False
-
         try:
-            self._reader, self._writer = await ssh_conn.open_connection(
-                self._addr, self._port
+            self._reader, self._writer = await asyncio.wait_for(
+                ssh_conn.open_connection(self._addr, self._port), self.__class__.timeout
             )
         except asyncssh.ChannelOpenError as e:
             utils.logger.warn(
@@ -403,7 +404,14 @@ class SSHTunnel(tunnel.Tunnel):
                 % (self.__class__.__name__, self._addr, self._port, self._url, e)
             )
             return False
-        return True
+        except asyncio.TimeoutError:
+            utils.logger.warn(
+                "[%s] Connect %s:%d over %s timeout"
+                % (self.__class__.__name__, self._addr, self._port, self._url)
+            )
+            return False
+        else:
+            return True
 
     async def read(self):
         if self._reader:
