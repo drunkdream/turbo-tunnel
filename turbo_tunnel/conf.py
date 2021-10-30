@@ -5,7 +5,6 @@
 import asyncio
 import fnmatch
 import os
-import socket
 
 import yaml
 
@@ -92,13 +91,6 @@ class TunnelRule(object):
                 host_match = True
                 break
 
-        if not host_match and not utils.is_ip_address(host):
-            addr, port = await utils.resolve_address(address)
-            if addr:
-                for tmpl in self._addr_list:
-                    if fnmatch.fnmatch(addr, tmpl.strip()):
-                        host_match = True
-                        break
         if not host_match:
             return False
 
@@ -198,6 +190,13 @@ class TunnelConfiguration(object):
         rules = self._rules[:]
         rules.sort(key=lambda it: it.priority, reverse=True)
         return rules
+
+    @property
+    def hosts(self):
+        hosts = {}
+        for it in self._conf_obj.get("hosts", []):
+            hosts[it["domain"]] = it["ip"]
+        return hosts
 
     @property
     def default_tunnel(self):

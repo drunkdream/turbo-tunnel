@@ -128,6 +128,8 @@ class TunnelChain(object):
         if cached_tunnel_index < 0:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
             stream = tornado.iostream.IOStream(s)
+            if self._tunnel_router:
+                tunnel_address = await self._tunnel_router.resolve(tunnel_address)
             tunn = tunnel.TCPTunnel(stream, None, tunnel_address)
             await tunn.connect()
             self._tunnel_list.append(tunn)
@@ -158,6 +160,8 @@ class TunnelChain(object):
             if i < len(tunnel_urls) - 1:
                 next_url = tunnel_urls[i + 1]
                 next_address = next_url.host, next_url.port
+            if self._tunnel_router:
+                next_address = await self._tunnel_router.resolve(next_address)
             tunn = tunnel_class(tunn, url, next_address)
             self._tunnel_list.append(tunn)
 
