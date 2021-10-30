@@ -375,7 +375,7 @@ async def resolve_address(address):
         ):
             return resolve_cache[address]["result"]
         resovler = tornado.netutil.Resolver()
-        result = None, 0
+        result = address
         try:
             addr_list = await resovler.resolve(*address)
         except socket.gaierror as e:
