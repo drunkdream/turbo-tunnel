@@ -382,7 +382,7 @@ async def resolve_address(address):
             logger.warn("Resolve %s failed: %s" % (address[0], e))
         else:
             for it in addr_list:
-                if it[0] == socket.AddressFamily:
+                if it[0] == socket.AddressFamily.AF_INET:
                     result = it[1]
                     break
         resolve_cache[address] = {"time": time.time(), "result": result}

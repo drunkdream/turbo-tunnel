@@ -131,7 +131,10 @@ class TunnelChain(object):
             if self._tunnel_router:
                 tunnel_address = await self._tunnel_router.resolve(tunnel_address)
             tunn = tunnel.TCPTunnel(stream, None, tunnel_address)
-            await tunn.connect()
+            if not await tunn.connect():
+                raise utils.TunnelConnectError(
+                    "Create %s to %s:%d failed" % (tunn, address[0], address[1])
+                )
             self._tunnel_list.append(tunn)
             if tunnel_urls[0].protocol == "tcp" and not tunnel_urls[0].host:
                 # Avoid duplicated tcp tunnel
