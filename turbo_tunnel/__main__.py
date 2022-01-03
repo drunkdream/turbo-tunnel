@@ -18,7 +18,7 @@ from . import server
 from . import utils
 
 
-def main():
+async def async_main():
     parser = argparse.ArgumentParser(
         prog="turbo-tunnel", description="TurboTunnel cmdline tool."
     )
@@ -69,6 +69,7 @@ def main():
             print("Config file %s not exist" % args.config, file=sys.stderr)
             return -1
         config = conf.TunnelConfiguration(args.config, args.auto_reload)
+        await config.load()
         router = route.TunnelRouter(config)
         for listen_url in config.listen_urls:
             tunnel_server = server.TunnelServer(listen_url, router)
@@ -131,6 +132,10 @@ def main():
 
     for tunnel_server in tunnel_servers:
         tunnel_server.start()
+
+
+def main():
+    utils.safe_ensure_future(async_main())
     try:
         tornado.ioloop.IOLoop.current().start()
     except KeyboardInterrupt:

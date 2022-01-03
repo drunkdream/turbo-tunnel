@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from turbo_tunnel import conf
-from .util import conf_yaml
+from .util import conf_yaml, conf_yaml2
 
 
 def test_tunnel():
@@ -54,14 +54,24 @@ async def test_tunnel_rule():
         assert await rule.is_hit(("wwww.qq.com", 5555)) == False
 
 
-def test_conf_yaml():
+async def test_conf_yaml():
     conf_file = "conf.yml"
     with open(conf_file, "w") as fp:
         fp.write(conf_yaml)
+    conf_file2 = "second.yml"
+    with open(conf_file2, "w") as fp:
+        fp.write(conf_yaml2)
     config = conf.TunnelConfiguration(conf_file)
+    await config.load()
+    assert config.external_confs[0] == "./second.yml"
     assert config.listen_urls[0] == "http://127.0.0.1:6666"
     assert config.listen_urls[1] == "socks5://127.0.0.1:7777"
+
+    assert len(config.tunnels) == 4
+    assert config.tunnels[-1].id == "test"
+
     rules = config.rules
     assert rules[0].id == "local"
     assert rules[1].id == "lan"
     assert rules[2].id == "wan"
+    assert rules[3].id == "test"

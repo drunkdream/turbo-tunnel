@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.parse
 
+import tornado.httpclient
 import tornado.iostream
 import tornado.netutil
 
@@ -411,8 +412,17 @@ def win32_daemon():
             cmdline.append(it)
 
     DETACHED_PROCESS = 8
-    subprocess.Popen(
-        cmdline,
-        creationflags=DETACHED_PROCESS,
-        close_fds=True
-    )
+    subprocess.Popen(cmdline, creationflags=DETACHED_PROCESS, close_fds=True)
+
+
+async def fetch(url):
+    http_client = tornado.httpclient.AsyncHTTPClient()
+    try:
+        response = await http_client.fetch(url)
+    except Exception:
+        logger.exception("Fetch %s failed" % url)
+        return None
+    else:
+        return response.body
+    finally:
+        http_client.close()
