@@ -54,6 +54,8 @@ listen:
   - http://127.0.0.1:6666
   - socks5://127.0.0.1:7777
 
+include: ./second.yml
+
 tunnels:
   - id: direct
     url: tcp://
@@ -84,7 +86,21 @@ rules:
     tunnel: block
 """
 
+conf_yaml2 = """
+version: 1.0
 
+tunnels:
+  - id: test
+    url: http://127.0.0.1:7777
+
+rules:
+  - id: test
+    priority: 90
+    addr: "*.test.com"
+    port: 1-65535
+    tunnel: block
+
+"""
 def get_random_port():
     while True:
         port = random.randint(10000, 65000)
