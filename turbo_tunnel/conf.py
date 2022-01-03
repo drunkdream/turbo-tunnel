@@ -5,6 +5,7 @@
 import asyncio
 import fnmatch
 import os
+import tempfile
 
 import yaml
 
@@ -17,6 +18,12 @@ class Tunnel(object):
         self._url = utils.Url(tunnel["url"])
         self._is_default = tunnel.get("default", False)
         self._dependency = tunnel.get("dependency", None)
+
+    def __eq__(self, other):
+        if not other or not isinstance(other, Tunnel):
+            return False
+        else:
+            return self._id == other.id
 
     def __str__(self):
         return "<Tunnel object id=%s url=%s at 0x%.x>" % (self._id, self._url, id(self))
@@ -108,26 +115,37 @@ class TunnelRule(object):
 
 
 class TunnelConfiguration(object):
-    """Tunnel Configuration
-    """
+    """Tunnel Configuration"""
 
     reload_interval = 1
 
-    def __init__(self, conf_file, auto_reload=False):
+    @staticmethod
+    def create(conf_addr, root=None, auto_reload=False):
+        if conf_addr.startswith("http://") or conf_addr.startswith("https://"):
+            return TunnelHTTPConfiguration(
+                conf_addr, root=root, auto_reload=auto_reload
+            )
+        elif os.path.isfile(conf_addr):
+            return TunnelConfiguration(conf_addr, root=root, auto_reload=auto_reload)
+        else:
+            raise ValueError("Unsupported config file %s" % conf_addr)
+
+    def __init__(self, conf_file, root=None, auto_reload=False):
         self._conf_file = conf_file
-        if not os.path.exists(self._conf_file):
-            raise RuntimeError("Configuration file %s not exist" % self._conf_file)
         self._auto_reload = auto_reload
         self._conf_obj = None
+        self._listen_urls = []
+        self._tunnels = []
+        self._rules = []
         self._last_modified = None
-        self.load()
+        self._root = root
         if self._auto_reload:
             utils.AsyncTaskManager().start_task(self.reload_task())
 
     async def reload_task(self):
         while True:
             await asyncio.sleep(self.reload_interval)
-            self.load()
+            await self.load()
 
     def parse(self):
         with open(self._conf_file) as fp:
@@ -140,22 +158,30 @@ class TunnelConfiguration(object):
                 )
                 return None
 
-    def load(self):
+    async def load(self):
         if not os.path.exists(self._conf_file):
-            utils.logger.warn("[%s] Config file not exist" % self.__class__.__name__)
-            return
+            utils.logger.warn(
+                "[%s] Config file %s not exist"
+                % (self.__class__.__name__, self._conf_file)
+            )
+            return False
         last_modified = os.path.getmtime(self._conf_file)
         if not self._last_modified or last_modified > self._last_modified:
             if self._last_modified:
                 utils.logger.info("[%s] Reload config file" % self.__class__.__name__)
             config = self.parse()
             if not config:
-                return
+                return False
             self._conf_obj = config
             if not self._conf_obj.get("version"):
                 raise utils.ConfigError("Field `version` not found")
-            elif not self._conf_obj.get("listen"):
-                raise utils.ConfigError("Field `listen` not found")
+            self._listen_urls = []
+            if self._conf_obj.get("listen"):
+                listen_urls = self._conf_obj.get("listen")
+                if isinstance(listen_urls, list):
+                    self._listen_urls.extend(listen_urls)
+                else:
+                    self._listen_urls.append(listen_urls)
 
             self._tunnels = []
             for tunnel in self._conf_obj.get("tunnels", []):
@@ -175,7 +201,26 @@ class TunnelConfiguration(object):
                     utils.logger.error(
                         "[%s] Load plugin %s failed" % (self.__class__.__name__, plugin)
                     )
+            for conf_addr in self.external_confs:
+                config = TunnelConfiguration.create(
+                    conf_addr, root=self, auto_reload=self._auto_reload
+                )
+                if not await config.load():
+                    utils.logger.warn(
+                        "[%s] Load external config file %s failed"
+                        % (self.__class__.__name__, conf_addr)
+                    )
+                    continue
+                self._listen_urls.extend(config.external_confs)
+                for tunnel in config.tunnels:
+                    if not tunnel in self._tunnels:
+                        self._tunnels.append(tunnel)
+                self._rules.extend(config.rules)
+
+            if not self._root and not self._listen_urls:
+                raise utils.ConfigError("Field `listen` not found")
             self._last_modified = last_modified
+        return True
 
     @property
     def version(self):
@@ -183,10 +228,18 @@ class TunnelConfiguration(object):
 
     @property
     def listen_urls(self):
-        urls = self._conf_obj["listen"]
-        if not isinstance(urls, list):
-            urls = [urls]
-        return urls
+        return self._listen_urls
+
+    @property
+    def external_confs(self):
+        confs = self._conf_obj.get("include", [])
+        if confs and not isinstance(confs, list):
+            confs = [confs]
+        return confs
+
+    @property
+    def tunnels(self):
+        return self._tunnels
 
     @property
     def rules(self):
@@ -217,3 +270,25 @@ class TunnelConfiguration(object):
                 return tunnel
         else:
             raise RuntimeError("Tunnel %s not found" % id)
+
+
+class TunnelHTTPConfiguration(TunnelConfiguration):
+    """Tunnel HTTP Configuration"""
+
+    def __init__(self, conf_url, root=None, auto_reload=False):
+        self._conf_url = conf_url
+        super(TunnelHTTPConfiguration, self).__init__(
+            tempfile.mkstemp(".yaml")[1], root, auto_reload
+        )
+
+    async def load(self):
+        content = await utils.fetch(self._conf_url)
+        if not content:
+            utils.logger.warn(
+                "[%s] Fetch config file url %s failed"
+                % (self.__class__.__name__, self._conf_url)
+            )
+            return False
+        with open(self._conf_file, "wb") as fp:
+            fp.write(content)
+        return await super(TunnelHTTPConfiguration, self).load()
