@@ -63,19 +63,22 @@ def main():
             else:
                 utils.logger.error("Load plugin %s failed" % plugin)
 
-    tunnel_server = None
+    tunnel_servers = []
     if args.config:
         if not os.path.exists(args.config):
             print("Config file %s not exist" % args.config, file=sys.stderr)
             return -1
         config = conf.TunnelConfiguration(args.config, args.auto_reload)
         router = route.TunnelRouter(config)
-        tunnel_server = server.TunnelServer(config.listen_url, router)
+        for listen_url in config.listen_urls:
+            tunnel_server = server.TunnelServer(listen_url, router)
+            tunnel_servers.append(tunnel_server)
     elif args.listen:
         tunnel = args.tunnel
         if not tunnel:
             tunnel = ["tcp://"]
         tunnel_server = server.TunnelServer(args.listen, tunnel)
+        tunnel_servers.append(tunnel_server)
     else:
         print("Argument --listen not specified", file=sys.stderr)
         return -1
@@ -121,12 +124,13 @@ def main():
     if args.retry:
         server.TunnelServer.retry_count = args.retry
 
-    if sys.platform == 'win32' and sys.version_info[1] >= 8:
+    if sys.platform == "win32" and sys.version_info[1] >= 8:
         # on Windows, the default asyncio event loop is ProactorEventLoop from python3.8
         loop = asyncio.SelectorEventLoop()
         asyncio.set_event_loop(loop)
 
-    tunnel_server.start()
+    for tunnel_server in tunnel_servers:
+        tunnel_server.start()
     try:
         tornado.ioloop.IOLoop.current().start()
     except KeyboardInterrupt:

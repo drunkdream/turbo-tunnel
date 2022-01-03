@@ -182,8 +182,11 @@ class TunnelConfiguration(object):
         return self._conf_obj["version"]
 
     @property
-    def listen_url(self):
-        return self._conf_obj["listen"]
+    def listen_urls(self):
+        urls = self._conf_obj["listen"]
+        if not isinstance(urls, list):
+            urls = [urls]
+        return urls
 
     @property
     def rules(self):
