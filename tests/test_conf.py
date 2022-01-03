@@ -59,6 +59,8 @@ def test_conf_yaml():
     with open(conf_file, "w") as fp:
         fp.write(conf_yaml)
     config = conf.TunnelConfiguration(conf_file)
+    assert config.listen_urls[0] == "http://127.0.0.1:6666"
+    assert config.listen_urls[1] == "socks5://127.0.0.1:7777"
     rules = config.rules
     assert rules[0].id == "local"
     assert rules[1].id == "lan"
