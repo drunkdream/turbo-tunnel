@@ -116,7 +116,8 @@ class TestSSHTunnel(object):
 
     @classmethod
     def teardown_class(cls):
-        cls.server.close()
+        if hasattr(cls, "server"):
+            cls.server.close()
 
     async def ensure_start_server(self):
         if not hasattr(self, "_server_started") or not self._server_started:

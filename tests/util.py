@@ -50,7 +50,9 @@ def start_demo_http_server(port):
 conf_yaml = r"""
 version: 1.0
 
-listen: https://127.0.0.1:6666
+listen: 
+  - http://127.0.0.1:6666
+  - socks5://127.0.0.1:7777
 
 tunnels:
   - id: direct
