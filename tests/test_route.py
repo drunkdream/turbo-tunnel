@@ -11,6 +11,7 @@ async def test_route():
     with open(conf_file, "w") as fp:
         fp.write(conf_yaml)
     config = conf.TunnelConfiguration(conf_file)
+    await config.load()
     router = route.TunnelRouter(config)
     rule, tunnel = await router.select(("127.0.0.1", 80))
     assert rule == "local"
