@@ -10,8 +10,6 @@
 ![Unittest](https://github.com/drunkdream/turbo-tunnel/workflows/Unittest/badge.svg)
 [![codecov.io](https://codecov.io/github/drunkdream/turbo-tunnel/coverage.svg?branch=master)](https://codecov.io/github/drunkdream/turbo-tunnel)
 
-[中文文档](https://ttun.top/)
-
 ## 环境要求
 
 - 操作系统： `Windows`、`Linux`、`MacOS`
@@ -20,18 +18,20 @@
 ## 主要功能
 
 - 提供访问各种不同代理服务的能力
-- 目前支持的代理服务类型包括：`https`、`socks4`、`websocket`、`ssh`
-- 目前可以创建的代理服务类型有：`https`、`socks4`、`websocket`
+- 目前支持的代理服务类型包括：`https`、`socks4`、`socks5`、`websocket`、`ssh`
+- 目前可以创建的代理服务类型有：`https`、`socks4`、`socks5`、`websocket`
 - 还支持端口映射等非代理服务
 - 支持通过配置文件的方式，指定不同的策略，允许使用不同的代理服务访问不同的目标服务
 
-## 使用方法
-
-### 安装方法
+## 安装方法
 
 ```bash
 $ pip3 install turbo-tunnel
 ```
+
+## 基本功能介绍
+
+详情请见[中文文档](https://ttun.top/)
 
 ### 端口映射
 
@@ -123,6 +123,10 @@ $ turbo-tunnel -l http://127.0.0.1:8080 -t socks://10.1.1.1:1080 -t ssh://userna
 version: 1.0
 
 listen: http://127.0.0.1:6666 # 配置监听地址
+
+hosts:
+  - domain: www.test.com
+    ip: 1.2.3.4
 
 tunnels:
   - id: direct
