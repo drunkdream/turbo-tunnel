@@ -304,6 +304,14 @@ class SSHTunnelServer(server.TunnelServer, MicroSSHServer):
         asyncio.ensure_future(MicroSSHServer.start(self))
 
 
+class SSHClientConnection(asyncssh.SSHClientConnection):
+    async def kbdint_challenge_received(self, name, instructions, lang, prompts):
+        """Return responses to a keyboard-interactive auth challenge"""
+        if not prompts:
+            return []
+        return [self._options.password]
+
+
 class SSHTunnel(tunnel.Tunnel):
     """SSH Tunnel"""
 
@@ -354,11 +362,14 @@ class SSHTunnel(tunnel.Tunnel):
                 else:
                     username = self._url.auth
                 options["username"] = username
+
                 if password:
                     if private_key_path:
                         options["passphrase"] = password
                     else:
                         options["password"] = password
+                else:
+                    options["password"] = ""
             try:
                 options = asyncssh.SSHClientConnectionOptions(**options)
             except (asyncssh.KeyImportError, asyncssh.KeyEncryptionError) as e:
@@ -372,7 +383,7 @@ class SSHTunnel(tunnel.Tunnel):
                 "[%s] Create connection to ssh server %s:%d"
                 % (self.__class__.__name__, self._url.host, self._url.port)
             )
-            ssh_conn = asyncssh.SSHClientConnection(loop, options, wait="auth")
+            ssh_conn = SSHClientConnection(loop, options, wait="auth")
             transport = tunnel.TunnelTransport(self._tunnel, ssh_conn)
             ssh_conn.connection_made(transport)
             try:
