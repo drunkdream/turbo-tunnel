@@ -1,3 +1,4 @@
+async_dns
 asyncssh>=2.3.0,<2.9.0; python_version >= '3.6'
 python-daemon
 pyyaml
