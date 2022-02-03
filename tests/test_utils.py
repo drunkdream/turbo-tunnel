@@ -83,6 +83,9 @@ async def test_resolve_address():
         return address[0]
 
     result = await resolve("www.qq.com", 0.1)
+    socket.getaddrinfo = orig_getaddrinfo
     assert re.match(r"[\d\.]+", result)
+    socket.getaddrinfo = hooked_getaddrinfo
     result = await resolve("domainnotexist.com", 6)
+    socket.getaddrinfo = orig_getaddrinfo
     assert result == "domainnotexist.com"
