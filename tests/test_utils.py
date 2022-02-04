@@ -74,18 +74,18 @@ async def test_resolve_address():
 
     socket.getaddrinfo = hooked_getaddrinfo
 
-    async def resolve(domain, expect_timeout=0):
+    async def resolve(domain):
         time0 = time.time()
         address = await utils.resolve_address((domain, 80))
         time1 = time.time()
-        if expect_timeout > 0:
-            assert time1 - time0 <= expect_timeout
-        return address[0]
+        return address[0], time1 - time0
 
-    result = await resolve("www.qq.com", 0.1)
+    result, cost = await resolve("www.qq.com")
     socket.getaddrinfo = orig_getaddrinfo
     assert re.match(r"[\d\.]+", result)
+    assert cost < 1
     socket.getaddrinfo = hooked_getaddrinfo
-    result = await resolve("domainnotexist.com", 6)
+    result, cost = await resolve("domainnotexist.com")
     socket.getaddrinfo = orig_getaddrinfo
     assert result == "domainnotexist.com"
+    assert cost < 6
