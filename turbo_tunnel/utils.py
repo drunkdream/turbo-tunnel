@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 import os
+import random
 import re
 import subprocess
 import sys
@@ -386,8 +387,21 @@ def get_nameserver():
     return name_servers
 
 
+def patch_async_dns():
+    if sys.platform == "win32":
+        from async_dns.request import udp
+        from async_dns.core import types
+
+        for ip_type in (types.A,):
+            if not udp.Dispatcher.data.get(ip_type):
+                udp.Dispatcher.data[ip_type] = udp.Dispatcher(
+                    ip_type, ("0.0.0.0", random.randint(1024, 65535))
+                )
+
+
 name_servers = get_nameserver()
 assert len(name_servers) > 0
+
 resovle_timeout = 600
 resolve_cache = {}
 
@@ -399,6 +413,8 @@ async def resolve_address(address):
             and time.time() - resolve_cache[address]["time"] <= resovle_timeout
         ):
             return resolve_cache[address]["result"]
+
+        patch_async_dns()
         resolver = async_dns.resolver.DNSClient()
         result = address
         res = None
