@@ -6,12 +6,16 @@ import asyncio
 import inspect
 import logging
 import os
-import socket
+import random
+import re
 import subprocess
 import sys
 import time
 import urllib.parse
 
+import async_dns.core
+import async_dns.core.config
+import async_dns.resolver
 import tornado.httpclient
 import tornado.iostream
 import tornado.netutil
@@ -262,6 +266,10 @@ class TimeoutError(RuntimeError):
     pass
 
 
+class ResolveError(RuntimeError):
+    pass
+
+
 class TunnelError(RuntimeError):
     pass
 
@@ -361,33 +369,74 @@ class Process(object):
 
 
 def is_ip_address(addr):
-    return tornado.netutil.is_valid_ip(addr)
+    """check is valid v4/v6 ip"""
+    patterns = (
+        r"(25[0-5]|2[0-4]\d|[0-1]?\d?\d)(\.(25[0-5]|2[0-4]\d|[0-1]?\d?\d)){3}",
+        r"^\s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))(%.+)?\s*$",
+    )
+    for pattern in patterns:
+        if re.match(pattern, addr):
+            return True
+    return False
 
+
+def get_nameserver():
+    name_servers = async_dns.core.config.get_nameservers()
+    name_servers = [it for it in name_servers if "." in it]
+    name_servers.extend(async_dns.core.config.core_config.get("default_nameservers"))
+    return name_servers
+
+
+def patch_async_dns():
+    if sys.platform == "win32":
+        from async_dns.request import udp
+        from async_dns.core import types
+
+        for ip_type in (types.A,):
+            if not udp.Dispatcher.data.get(ip_type):
+                udp.Dispatcher.data[ip_type] = udp.Dispatcher(
+                    ip_type, ("0.0.0.0", random.randint(1024, 65535))
+                )
+
+
+name_servers = get_nameserver()
+assert len(name_servers) > 0
 
 resovle_timeout = 600
 resolve_cache = {}
 
 
 async def resolve_address(address):
-    if not tornado.netutil.is_valid_ip(address[0]):
+    if not is_ip_address(address[0]):
         if (
             address in resolve_cache
             and time.time() - resolve_cache[address]["time"] <= resovle_timeout
         ):
             return resolve_cache[address]["result"]
-        resovler = tornado.netutil.Resolver()
+
+        patch_async_dns()
+        resolver = async_dns.resolver.DNSClient()
         result = address
-        try:
-            addr_list = await resovler.resolve(*address)
-        except socket.gaierror as e:
-            logger.warn("Resolve %s failed: %s" % (address[0], e))
-        else:
+        res = None
+        for name_server in name_servers:
+            try:
+                res = await resolver.query(
+                    address[0],
+                    async_dns.core.types.A,
+                    async_dns.core.Address.parse(name_server),
+                )
+            except asyncio.TimeoutError:
+                pass
+            else:
+                break
+        if res:
+            addr_list = res.an
             for it in addr_list:
-                if it[0] == socket.AddressFamily.AF_INET:
-                    result = it[1]
+                if it.data.type_name == "a":
+                    result = (it.data.data, address[1])
                     break
-        resolve_cache[address] = {"time": time.time(), "result": result}
-        return result
+            resolve_cache[address] = {"time": time.time(), "result": result}
+            return result
     return address
 
 

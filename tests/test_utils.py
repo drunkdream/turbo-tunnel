@@ -3,10 +3,9 @@
 """
 
 import asyncio
-import random
+import re
 import socket
-
-import tornado
+import time
 
 from turbo_tunnel import utils
 
@@ -65,3 +64,28 @@ async def test_wait_for_tasks():
     curr_tasks = len(async_task_mgr.running_tasks)
     await async_task_mgr.wait_for_tasks([task1(), task2()])
     assert len(async_task_mgr.running_tasks) == curr_tasks
+
+
+async def test_resolve_address():
+    orig_getaddrinfo = socket.getaddrinfo
+
+    def hooked_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        raise RuntimeError("socket.getaddrinfo should not called")
+
+    socket.getaddrinfo = hooked_getaddrinfo
+
+    async def resolve(domain):
+        time0 = time.time()
+        address = await utils.resolve_address((domain, 80))
+        time1 = time.time()
+        return address[0], time1 - time0
+
+    result, cost = await resolve("www.baidu.com")
+    socket.getaddrinfo = orig_getaddrinfo
+    assert re.match(r"[\d\.]+", result)
+    assert cost < 1
+    socket.getaddrinfo = hooked_getaddrinfo
+    result, cost = await resolve("domainnotexist.com")
+    socket.getaddrinfo = orig_getaddrinfo
+    assert result == "domainnotexist.com"
+    assert cost < 6
