@@ -165,10 +165,19 @@ class TCPTunnel(Tunnel):
 
     async def connect(self):
         if self._stream:
+            addr, port = self._addr, self._port
+            if not utils.is_ip_address(addr):
+                addr, port = await utils.resolve_address((addr, port))
+                if addr == self._addr:
+                    utils.logger.warning(
+                        "[%s] Resolve address %s failed"
+                        % (self.__class__.__name__, addr)
+                    )
+                    return False
             try:
-                return await self._stream.connect((self._addr, self._port))
+                return await self._stream.connect((addr, port))
             except tornado.iostream.StreamClosedError:
-                utils.logger.warn(
+                utils.logger.warning(
                     "[%s] Connect %s:%d failed"
                     % (self.__class__.__name__, self._addr, self._port)
                 )
