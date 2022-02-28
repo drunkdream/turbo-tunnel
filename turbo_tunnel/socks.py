@@ -504,7 +504,7 @@ class Socks5UDPForwardPacket(object):
             buffer += struct.pack("B", EnumSocks5AddressType.IPV4)
             buffer += socket.inet_aton(self._address[0])
             buffer += struct.pack("!H", self._address[1])
-        buffer += self._data
+        buffer += self._payload
         return buffer
 
     @staticmethod
@@ -551,26 +551,40 @@ class UDPProxyProtocol(object):
         )
 
     def error_received(self, exc):
-        print('Error received:', exc)
+        utils.logger.warning(
+            "[%s] Error received: %s" % (self.__class__.__name__, exc)
+        )
 
     def connection_lost(self, exc):
-        print("Connection closed")
+        utils.logger.info("[%s] UDP connection closed" % self.__class__.__name__)
 
 
 class UDPProxyServer(object):
     def __init__(self, listen_addr):
         self._listen_addr = listen_addr
+        self._server_transport = None
         self._transports = {}
         self._running = True
 
     async def create_server(self):
-        return await self.create_transport(
+        self._server_transport = await self.create_transport(
             local_addr=self._listen_addr
         )
+        return self._server_transport
 
     async def serve_forever(self):
         while self._running:
             await asyncio.sleep(0.1)
+
+    def close(self):
+        self._server_transport.close()
+        self._server_transport = None
+        for key in self._transports:
+            _, source_transport, target_transport = self._transports[key]
+            source_transport.close()
+            target_transport.close()
+        self._transports = []
+        self._running = False
 
     async def create_transport(self, local_addr=None, remote_addr=None):
         if not local_addr and not remote_addr:
@@ -585,22 +599,36 @@ class UDPProxyServer(object):
 
     async def on_data_received(self, addr, source_transport, data):
         transport = None
+        buffer = b""
+        address = None
         if addr in self._transports:
             # recv from server
-            source_transport, target_transport = self._transports[addr]
-            print("in", addr, "=>", data)
+            address, source_transport, target_transport = self._transports[addr]
+            utils.logger.debug(
+                "[%s] UDP %s => %s" % (self.__class__.__name__, address, addr)
+            )
             forward_packet = Socks5UDPForwardPacket(addr, data)
-            data = forward_packet.serialize()
+            buffer = forward_packet.serialize()
             transport = source_transport
         else:
             forward_packet = Socks5UDPForwardPacket.unserialize_from(data)
-            data = forward_packet.payload
-            print("out", addr, "=>", forward_packet.address, data)
-            target_transport = await self.create_transport(remote_addr=forward_packet.address)
+            buffer = forward_packet.payload
+            utils.logger.debug(
+                "[%s] UDP %s => %s"
+                % (self.__class__.__name__, addr, forward_packet.address)
+            )
+            target_transport = await self.create_transport(
+                remote_addr=forward_packet.address
+            )
             if forward_packet.address not in self._transports:
-                self._transports[forward_packet.address] = (source_transport, target_transport)
+                self._transports[forward_packet.address] = (
+                    addr,
+                    source_transport,
+                    target_transport,
+                )
             transport = target_transport
-        transport.sendto(data)
+            address = forward_packet.address
+        transport.sendto(buffer, address)
 
 
 class Socks5TunnelServer(server.TCPTunnelServer):
@@ -649,13 +677,14 @@ class Socks5TunnelServer(server.TCPTunnelServer):
         if resolved_target_address[0] == target_address[0]:
             resolved_target_address = ("255.255.255.255", resolved_target_address[1])
         if connect_request.command == EnumSocks5Command.UDP_ASSOCIATE:
-            print("udp", connect_request.address)
             listen_address = ("127.0.0.1", random.randint(50000, 60000))
             udp_proxy = UDPProxyServer(listen_address)
             await udp_proxy.create_server()
             connect_response = Socks5ConnectResponsePacket(0, listen_address)
             await downstream.write(connect_response.serialize())
-            await udp_proxy.serve_forever()
+            await stream.read_until_close()
+            udp_proxy.close()
+            return
         elif connect_request.command != EnumSocks5Command.CONNECT:
             utils.logger.warn(
                 "[%s] Only CONNECT command is supported: %s"
