@@ -627,7 +627,7 @@ class UDPProxyServer(object):
                     target_transport,
                 )
             transport = target_transport
-            address = forward_packet.address
+
         transport.sendto(buffer, address)
 
 
