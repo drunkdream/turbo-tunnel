@@ -80,7 +80,7 @@ async def test_resolve_address():
         time1 = time.time()
         return address[0], time1 - time0
 
-    result, cost = await resolve("www.baidu.com")
+    result, cost = await resolve("www.github.com")
     socket.getaddrinfo = orig_getaddrinfo
     assert re.match(r"[\d\.]+", result)
     assert cost < 1
