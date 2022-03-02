@@ -551,9 +551,7 @@ class UDPProxyProtocol(object):
         )
 
     def error_received(self, exc):
-        utils.logger.warning(
-            "[%s] Error received: %s" % (self.__class__.__name__, exc)
-        )
+        utils.logger.warning("[%s] Error received: %s" % (self.__class__.__name__, exc))
 
     def connection_lost(self, exc):
         utils.logger.info("[%s] UDP connection closed" % self.__class__.__name__)
@@ -677,9 +675,25 @@ class Socks5TunnelServer(server.TCPTunnelServer):
         if resolved_target_address[0] == target_address[0]:
             resolved_target_address = ("255.255.255.255", resolved_target_address[1])
         if connect_request.command == EnumSocks5Command.UDP_ASSOCIATE:
-            listen_address = ("127.0.0.1", random.randint(50000, 60000))
-            udp_proxy = UDPProxyServer(listen_address)
-            await udp_proxy.create_server()
+            listen_address = None
+            udp_proxy = None
+            while True:
+                listen_address = ("127.0.0.1", random.randint(10000, 65535))
+                udp_proxy = UDPProxyServer(listen_address)
+                try:
+                    await udp_proxy.create_server()
+                except OSError as ex:
+                    if ex.errno == 98:
+                        # Address already in use
+                        utils.logger.info(
+                            "[%s] UDP port %d is already listening"
+                            % (self.__class__.__name__, listen_address[1])
+                        )
+                        continue
+                    else:
+                        raise ex
+                else:
+                    break
             connect_response = Socks5ConnectResponsePacket(0, listen_address)
             await downstream.write(connect_response.serialize())
             await stream.read_until_close()
