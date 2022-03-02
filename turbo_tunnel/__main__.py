@@ -68,7 +68,7 @@ async def async_main():
         if not os.path.exists(args.config):
             print("Config file %s not exist" % args.config, file=sys.stderr)
             return -1
-        config = conf.TunnelConfiguration(args.config, args.auto_reload)
+        config = conf.TunnelConfiguration(args.config, auto_reload=args.auto_reload)
         await config.load()
         router = route.TunnelRouter(config)
         for listen_url in config.listen_urls:
