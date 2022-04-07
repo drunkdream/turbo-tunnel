@@ -18,38 +18,7 @@ from . import server
 from . import utils
 
 
-async def async_main():
-    parser = argparse.ArgumentParser(
-        prog="turbo-tunnel", description="TurboTunnel cmdline tool."
-    )
-    parser.add_argument("-c", "--config", help="config yaml file path")
-    parser.add_argument("-l", "--listen", help="listen url")
-    parser.add_argument("-t", "--tunnel", action="append", help="tunnel url")
-    parser.add_argument(
-        "--log-level",
-        help="log level, default is info",
-        choices=("debug", "info", "warn", "error"),
-        default="info",
-    )
-    parser.add_argument("--log-file", help="log file save path")
-    parser.add_argument("--retry", type=int, help="retry connect count", default=0)
-    parser.add_argument(
-        "--auto-reload",
-        help="auto reload config file",
-        action="store_true",
-        default=False,
-    )
-    parser.add_argument(
-        "-d", "--daemon", help="run as daemon", action="store_true", default=False
-    )
-    parser.add_argument("-p", "--plugin", help="load plugin", action="append")
-
-    args = sys.argv[1:]
-    if not args:
-        parser.print_help()
-        return 0
-
-    args = parser.parse_args(args)
+async def async_main(args):
 
     if args.plugin:
         for plugin in args.plugin:
@@ -87,14 +56,6 @@ async def async_main():
     log_file = None
     if args.log_file:
         log_file = os.path.abspath(args.log_file)
-
-    if sys.platform != "win32" and args.daemon:
-        import daemon
-
-        daemon.DaemonContext(stderr=open("error.txt", "w")).open()
-    elif args.daemon:
-        utils.win32_daemon()
-        return 0
 
     handler = logging.StreamHandler()
     formatter = logging.Formatter("[%(asctime)s][%(levelname)s]%(message)s")
@@ -135,7 +96,48 @@ async def async_main():
 
 
 def main():
-    utils.safe_ensure_future(async_main())
+    parser = argparse.ArgumentParser(
+        prog="turbo-tunnel", description="TurboTunnel cmdline tool."
+    )
+    parser.add_argument("-c", "--config", help="config yaml file path")
+    parser.add_argument("-l", "--listen", help="listen url")
+    parser.add_argument("-t", "--tunnel", action="append", help="tunnel url")
+    parser.add_argument(
+        "--log-level",
+        help="log level, default is info",
+        choices=("debug", "info", "warn", "error"),
+        default="info",
+    )
+    parser.add_argument("--log-file", help="log file save path")
+    parser.add_argument("--retry", type=int, help="retry connect count", default=0)
+    parser.add_argument(
+        "--auto-reload",
+        help="auto reload config file",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "-d", "--daemon", help="run as daemon", action="store_true", default=False
+    )
+    parser.add_argument("-p", "--plugin", help="load plugin", action="append")
+
+    args = sys.argv[1:]
+    if not args:
+        parser.print_help()
+        return 0
+
+    args = parser.parse_args(args)
+
+    if sys.platform != "win32" and args.daemon:
+        import daemon
+
+        # fork must be called before create event loop
+        daemon.DaemonContext(stderr=open("error.txt", "w")).open()
+    elif args.daemon:
+        utils.win32_daemon()
+        return 0
+
+    utils.safe_ensure_future(async_main(args))
     try:
         tornado.ioloop.IOLoop.current().start()
     except KeyboardInterrupt:
