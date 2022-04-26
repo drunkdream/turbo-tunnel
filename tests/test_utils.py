@@ -89,3 +89,12 @@ async def test_resolve_address():
     socket.getaddrinfo = orig_getaddrinfo
     assert result == "domainnotexist.com"
     assert cost < 6
+
+
+def test_checksum():
+    data = b"12345678"
+    result = utils.checksum(data)
+    assert result == 0x2f2b
+    data = b"123456780"
+    result = utils.checksum(data)
+    assert result == 0xf72a
