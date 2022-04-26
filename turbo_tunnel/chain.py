@@ -126,15 +126,19 @@ class TunnelChain(object):
 
         cached_tunnel_index = self.get_cached_tunnel(tunnel_urls)
         if cached_tunnel_index < 0:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
-            stream = tornado.iostream.IOStream(s)
             if self._tunnel_router:
                 tunnel_address = await self._tunnel_router.resolve(tunnel_address)
-            tunn = tunnel.TCPTunnel(stream, None, tunnel_address)
-            if not await tunn.connect():
-                raise utils.TunnelConnectError(
-                    "Create %s to %s:%d failed" % (tunn, address[0], address[1])
-                )
+            if tunnel_urls[0].protocol == "icmp":
+                tunn = None
+            else:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+                stream = tornado.iostream.IOStream(s)
+
+                tunn = tunnel.TCPTunnel(stream, None, tunnel_address)
+                if not await tunn.connect():
+                    raise utils.TunnelConnectError(
+                        "Create %s to %s:%d failed" % (tunn, address[0], address[1])
+                    )
             self._tunnel_list.append(tunn)
             if tunnel_urls[0].protocol == "tcp" and not tunnel_urls[0].host:
                 # Avoid duplicated tcp tunnel
