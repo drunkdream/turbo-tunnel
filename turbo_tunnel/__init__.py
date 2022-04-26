@@ -3,13 +3,14 @@
 """Turbo tunnel
 """
 
-VERSION = "0.14.0"
+VERSION = "0.15.0"
 
 import sys
 import traceback
 
 try:
     from . import https
+    from . import icmp
     from . import server
     from . import socks
 
