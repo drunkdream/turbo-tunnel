@@ -290,6 +290,10 @@ class TunnelPacketError(TunnelError):
     pass
 
 
+class TunnelPacketLengthError(TunnelPacketError):
+    pass
+
+
 class ParamError(RuntimeError):
     pass
 
@@ -475,3 +479,17 @@ async def fetch(url):
         return response.body
     finally:
         http_client.close()
+
+
+def checksum(data):
+    s = 0
+    n = len(data) % 2
+    for i in range(0, len(data) - n, 2):
+        s += data[i + 1] + (data[i] << 8)
+    if n:
+        s += data[i + 1] << 8
+
+    while s >> 16:
+        s = (s & 0xFFFF) + (s >> 16)
+    s = ~s & 0xFFFF
+    return s
