@@ -490,7 +490,8 @@ class ICMPSessionStream(object):
         ):
             # ack already send to peer
             utils.logger.debug(
-                "[%s] Ignore send ack %d" % (self.__class__.__name__, seq_num)
+                "[%s] Ignore send ack of message %d"
+                % (self.__class__.__name__, seq_num)
             )
             return
         event = (
@@ -600,15 +601,18 @@ class ICMPTransportSocket(object):
                 # message is received by peer
                 message = self._sending_buffers.pop(key)
                 self._unack_packets -= 1
-                log = "[%s] Received ack of message %d from %s:%d" % (
-                    self.__class__.__name__,
-                    key[1],
-                    address[0],
-                    address[1],
-                )
                 if message["count"] > 1:
-                    log += ", tried %d times" % message["count"]
-                utils.logger.debug(log)
+                    log = (
+                        "[%s] Received ack of message %d from %s:%d, tried %d times"
+                        % (
+                            self.__class__.__name__,
+                            key[1],
+                            address[0],
+                            address[1],
+                            message["count"],
+                        )
+                    )
+                    utils.logger.debug(log)
                 ack_matched = True
 
         if not ack_matched:
@@ -845,7 +849,7 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                         "[%s] Connection %s:%d => %s:%d established"
                         % (
                             self.__class__.__name__,
-                            self._local_address[0],
+                            self._local_address[0] or "0.0.0.0",
                             self._local_address[1],
                             self._remote_address[0],
                             self._remote_address[1],
@@ -918,9 +922,7 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                     )
                 )
                 return
-            elif (
-                time.time() - last_ping_time >= self.__class__.PING_INTERVAL
-            ):
+            elif time.time() - last_ping_time >= self.__class__.PING_INTERVAL:
                 await self.send(
                     ICMPTransportPacket.EVENT_PING, msg_seq=0, wait_for_ack=False
                 )
@@ -1269,6 +1271,14 @@ class ICMPTunnelStreamManager(object):
             if stream_packet.event == StreamForwardPacket.EVENT_CREATE:
                 target_address = tuple(stream_packet.target_address)
                 if self._server_side:
+                    utils.logger.info(
+                        "[%s] Received EVENT_CREATE message to %s:%d"
+                        % (
+                            self.__class__.__name__,
+                            target_address[0],
+                            target_address[1],
+                        )
+                    )
                     utils.safe_ensure_future(self.create_stream(target_address))
                 else:
                     stream_id = stream_packet.result
