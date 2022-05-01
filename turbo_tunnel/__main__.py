@@ -61,7 +61,9 @@ async def async_main(args):
     formatter = logging.Formatter("[%(asctime)s][%(levelname)s]%(message)s")
     handler.setFormatter(formatter)
 
-    if args.log_level == "debug":
+    if args.log_level == "verbose":
+        utils.logger.setLevel(5)
+    elif args.log_level == "debug":
         utils.logger.setLevel(logging.DEBUG)
     elif args.log_level == "info":
         utils.logger.setLevel(logging.INFO)
@@ -105,7 +107,7 @@ def main():
     parser.add_argument(
         "--log-level",
         help="log level, default is info",
-        choices=("debug", "info", "warn", "error"),
+        choices=("verbose", "debug", "info", "warn", "error"),
         default="info",
     )
     parser.add_argument("--log-file", help="log file save path")

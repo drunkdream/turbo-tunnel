@@ -23,6 +23,16 @@ import tornado.netutil
 logger = logging.getLogger("turbo-tunnel")
 
 
+def verbose_logging(msg):
+    if logger.level < logging.DEBUG:
+        return logger.debug(msg)
+
+
+logging._nameToLevel["VERBOSE"] = 5
+logging._levelToName[5] = "VERBOSE"
+logger.verbose = verbose_logging
+
+
 class Url(object):
     def __init__(self, url):
         self._url = url
