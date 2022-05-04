@@ -156,7 +156,7 @@ class TunnelConnection(object):
 
     def on_data_recevied(self, buffer):
         self._bytes_received += len(buffer)
-        utils.logger.debug('[%s][%s:%d][%s:%d] %d bytes recevied' %
+        utils.logger.debug('[%s][%s:%d][%s:%d] %d bytes received' %
                            (self.__class__.__name__, self._client_address[0],
                             self._client_address[1], self._target_address[0],
                             self._target_address[1], len(buffer)))
