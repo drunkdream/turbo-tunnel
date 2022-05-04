@@ -178,7 +178,13 @@ class AsyncICMPSocket(object):
         self._transport.sendto(icmp_packet.serialize(), address)
         utils.logger.verbose(
             "[%s] Send %d bytes icmp data to %s, ident=%d, seq=%d"
-            % (self.__class__.__name__, len(buffer.rstrip(b"\x00")), address[0], ident, seq)
+            % (
+                self.__class__.__name__,
+                len(buffer.rstrip(b"\x00")),
+                address[0],
+                ident,
+                seq,
+            )
         )
         return seq
 
@@ -255,7 +261,7 @@ class ICMPTransportPacket(object):
     EVENT_PING = b"PING"
     EVENT_PONG = b"PONG"
     EVENT_CLOSE = b"CLSE"
-    MAX_DATA_SIZE = 1280
+    MAX_DATA_SIZE = 1440
 
     def __init__(self, seq, ack, event, client_port, server_port, padding):
         self._seq = seq
@@ -346,6 +352,8 @@ class ICMPSessionStream(object):
         self._recv_buffer = b""
         self._recv_event = asyncio.Event()
         self._last_alive_time = 0
+        self._last_data_time = 0
+        self._last_pong_time = 0
 
     def __eq__(self, other):
         if not isinstance(other, ICMPSessionStream):
@@ -389,6 +397,10 @@ class ICMPSessionStream(object):
     @property
     def last_alive_time(self):
         return self._last_alive_time
+
+    @property
+    def last_data_time(self):
+        return self._last_data_time
 
     async def read(self):
         if not self._recv_buffer:
@@ -441,9 +453,15 @@ class ICMPSessionStream(object):
                 if len(trans_packet.padding) < ICMPTransportPacket.MAX_DATA_SIZE
                 else 0
             )
-            utils.safe_ensure_future(self.delay_ack(seq_num, delay_time,))
+            utils.safe_ensure_future(
+                self.delay_ack(
+                    seq_num,
+                    delay_time,
+                )
+            )
 
     def on_data_received(self, seq_num, buffer):
+        self._last_data_time = time.time()
         self._recving_buffers[seq_num] = buffer
         while (self._last_seq + 1) in self._recving_buffers:
             buffer = self._recving_buffers.pop(self._last_seq + 1)
@@ -453,7 +471,7 @@ class ICMPSessionStream(object):
             self._last_seq += 1
 
     def add_response_slot(self, ident, seq):
-        self._response_slots.append((ident, seq))
+        self._response_slots.append((ident, seq, time.time()))
 
     def has_response_slot(self):
         return len(self._response_slots) > 0
@@ -465,7 +483,7 @@ class ICMPSessionStream(object):
             if time.time() - start_time >= 10:
                 raise RuntimeError("Waiting for response slot too slow")
         waiting_time = time.time() - start_time
-        if waiting_time >= 1:
+        if waiting_time >= 0.2:
             utils.logger.warning(
                 "[%s][%s:%d][%s:%d] Waiting for response slot cost %.2fs"
                 % (
@@ -478,10 +496,23 @@ class ICMPSessionStream(object):
                 )
             )
         result = self._response_slots.pop(0)
-        return result
+        if time.time() - result[2] >= ICMPTransportSocket.PING_INTERVAL + 1:
+            utils.logger.info(
+                "[%s] Response slot %d,%d timeout: %.2fs"
+                % (
+                    self.__class__.__name__,
+                    result[0],
+                    result[1],
+                    time.time() - result[2],
+                )
+            )
+            return await self.get_response_slot()
+        return result[0], result[1]
 
     async def delay_ack(
-        self, seq_num, delay_time,
+        self,
+        seq_num,
+        delay_time,
     ):
         last_send_ack = self._last_send_ack
         await asyncio.sleep(delay_time)
@@ -492,10 +523,11 @@ class ICMPSessionStream(object):
             and seq_num <= self._last_send_ack
         ):
             # ack already send to peer
-            utils.logger.verbose(
-                "[%s] Ignore send ack of message %d"
-                % (self.__class__.__name__, seq_num)
-            )
+            if seq_num > 0:
+                utils.logger.verbose(
+                    "[%s] Ignore send ack of message %d"
+                    % (self.__class__.__name__, seq_num)
+                )
             return
         event = (
             ICMPTransportPacket.EVENT_PONG
@@ -504,7 +536,17 @@ class ICMPSessionStream(object):
         )
 
         if self._server_side:
+            if (
+                time.time() - self._last_pong_time < delay_time
+                or not self.has_response_slot()
+            ):
+                utils.logger.verbose(
+                    "[%s] Ignore send pong packet, last pong time is %.2fs ago"
+                    % (self.__class__.__name__, time.time() - self._last_pong_time)
+                )
+                return
             await self._sock.send(self, event, msg_seq=0, wait_for_ack=False)
+            self._last_pong_time = time.time()
         else:
             await self._sock.send(event, msg_seq=0, wait_for_ack=False)
 
@@ -557,10 +599,9 @@ class ICMPTransportSocket(object):
     def __init__(self, server_side=False):
         self._sock = AsyncICMPSocket()
         self._server_side = server_side
-        self._sending_buffers = {}
+        self._sending_buffers = []
         self._unack_packets = 0
         self._last_acks = {}
-        # self._last_send_acks = {}
         self._last_send_times = {}
         utils.safe_ensure_future(self.send_packets_task())
 
@@ -576,38 +617,46 @@ class ICMPTransportSocket(object):
         icmp_seq=None,
         wait_for_ack=True,
     ):
-        key = (address, msg_seq)
-        assert key not in self._sending_buffers
-        self._sending_buffers[key] = {
-            "timestamp": 0,
-            "buffer": buffer,
-            "icmp_type": icmp_type,
-            "icmp_code": icmp_code,
-            "icmp_ident": icmp_ident,
-            "icmp_seq": icmp_seq,
-            "wait_for_ack": wait_for_ack,
-            "count": 0,
-        }
+        self._sending_buffers.append(
+            {
+                "address": address,
+                "msg_seq": msg_seq,
+                "timestamp": 0,
+                "buffer": buffer,
+                "icmp_type": icmp_type,
+                "icmp_code": icmp_code,
+                "icmp_ident": icmp_ident,
+                "icmp_seq": icmp_seq,
+                "wait_for_ack": wait_for_ack,
+                "count": 0,
+            }
+        )
+        if len(self._sending_buffers) > 5:
+            utils.logger.info(
+                "[%s] There is %d messages in sending buffers"
+                % (self.__class__.__name__, len(self._sending_buffers))
+            )
 
     def on_ack_received(self, address, ack_num):
         if ack_num <= 0:
             return
 
         ack_matched = False
-        for key in list(self._sending_buffers.keys()):
-            if key[0] != address:
+        delete_list = []
+        for message in self._sending_buffers:
+            if message["address"] != address or message["msg_seq"] == 0:
                 continue
 
-            if key[1] <= ack_num:
+            if message["msg_seq"] <= ack_num:
                 # message is received by peer
-                message = self._sending_buffers.pop(key)
+                delete_list.append(message)
                 self._unack_packets -= 1
                 if message["count"] > 1:
                     log = (
                         "[%s] Received ack of message %d from %s:%d, tried %d times"
                         % (
                             self.__class__.__name__,
-                            key[1],
+                            message["msg_seq"],
                             address[0],
                             address[1],
                             message["count"],
@@ -621,13 +670,26 @@ class ICMPTransportSocket(object):
                 "[%s] Ignore ack of message %d from %s:%d"
                 % (self.__class__.__name__, ack_num, address[0], address[1])
             )
+        if delete_list:
+            if message["count"] == 0:
+                utils.logger.info(
+                    "[%s] Ignore send messages: %s"
+                    % (
+                        self.__class__.__name__,
+                        ", ".join([str(it["msg_seq"]) for it in delete_list]),
+                    )
+                )
+            for it in delete_list:
+                self._sending_buffers.remove(it)
 
     async def wait_for_ack(self, address, msg_seq, timeout=None):
-        key = (address, msg_seq)
-        assert key in self._sending_buffers
         time0 = time.time()
         while not timeout or time.time() - time0 < timeout:
-            if key not in self._sending_buffers:
+            for it in self._sending_buffers:
+                if it["address"] == address and it["msg_seq"] == msg_seq:
+                    break
+            else:
+                # message not found in sending buffers
                 return
             await asyncio.sleep(0.005)
         else:
@@ -637,39 +699,51 @@ class ICMPTransportSocket(object):
             )
 
     async def send_packets_task(self):
-        send_timestamps = {}
-        send_min_interval = 0.01
+        send_times = {}
+        min_send_interval = 0.005
         while True:
             if not self._sending_buffers:
                 await asyncio.sleep(0.005)
 
             if self._unack_packets < self.__class__.DEFAULT_WINDOW_SIZE:
-                for key in list(self._sending_buffers.keys()):
-                    address, msg_seq = key
-                    message = self._sending_buffers[key]
+                for message in self._sending_buffers:
                     if time.time() - message["timestamp"] < self.__class__.ACK_TIMEOUT:
                         continue
-                    if address[0] not in send_timestamps:
-                        send_timestamps[address[0]] = 0
-                    if time.time() - send_timestamps[address[0]] < send_min_interval:
+                    if message["address"][0] not in send_times:
+                        send_times[message["address"][0]] = 0
+                    if (
+                        time.time() - send_times[message["address"][0]]
+                        < min_send_interval
+                    ):
                         continue
+                    if message["count"] > 0:
+                        utils.logger.info(
+                            "[%s] Resend message %d to %s, count=%d"
+                            % (
+                                self.__class__.__name__,
+                                message["msg_seq"],
+                                message["address"][0],
+                                message["count"]
+                            )
+                        )
                     self._sock.sendto(
                         message["buffer"],
-                        address[0],
+                        message["address"][0],
                         type=message["icmp_type"],
                         code=message["icmp_code"],
                         ident=message["icmp_ident"],
                         seq=message["icmp_seq"],
                     )
-                    send_timestamps[address[0]] = time.time()
-                    if msg_seq and message["wait_for_ack"]:
-                        self._last_send_times[address] = message[
+                    send_times[message["address"][0]] = time.time()
+                    if message["msg_seq"] and message["wait_for_ack"]:
+                        self._last_send_times[message["address"]] = message[
                             "timestamp"
                         ] = time.time()
                         message["count"] += 1
                         self._unack_packets += 1
                     else:
-                        self._sending_buffers.pop(key)
+                        self._sending_buffers.remove(message)
+                        break
             await asyncio.sleep(0.005)
 
     async def send(
@@ -686,7 +760,7 @@ class ICMPTransportSocket(object):
         wait_for_ack=True,
     ):
         utils.logger.debug(
-            "[%s] Send %s message to %s:%d, seq=%d, ack=%d, length=%d"
+            "[%s] Send %s message to %s:%d, seq=%d, ack=%d, length=%d, icmp_ident=%s, icmp_seq=%s"
             % (
                 self.__class__.__name__,
                 event.decode(),
@@ -695,6 +769,8 @@ class ICMPTransportSocket(object):
                 msg_seq,
                 msg_ack,
                 len(buffer),
+                icmp_ident,
+                icmp_seq,
             )
         )
 
@@ -727,6 +803,8 @@ class ICMPTransportSocket(object):
 class ICMPTransportClientSocket(ICMPTransportSocket):
     """ICMP Transport CLient Socket"""
 
+    MAX_PING_CONCURRENCY = 3
+
     def __init__(self):
         super(ICMPTransportClientSocket, self).__init__(server_side=False)
         self._local_address = None
@@ -735,6 +813,7 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
         self._next_seq = 1
         self._status = ICMPTransportSocket.STATUS_NOT_CONNECT
         self._last_pong_time = 0
+        self._current_pings = {}
 
     @property
     def session_stream(self):
@@ -751,7 +830,10 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
             msg_seq = self._session_stream.next_seq
         ack_num = self._session_stream.next_ack
         self._session_stream.on_send_ack(ack_num)
-
+        icmp_ident = None
+        if event == ICMPTransportPacket.EVENT_PING:
+            icmp_ident = random.randint(0, 65535)
+            self._current_pings[icmp_ident] = time.time()
         return await super(ICMPTransportClientSocket, self).send(
             self._remote_address[0],
             msg_seq,
@@ -760,6 +842,7 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
             self._local_address[1],
             self._remote_address[1],
             buffer,
+            icmp_ident=icmp_ident,
             wait_for_ack=wait_for_ack,
         )
 
@@ -793,7 +876,10 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
             if not buffer.startswith(ICMPTransportPacket.MAGIC_FLAG):
                 utils.logger.info(
                     "[%s] Ignore unexpected pong packet: length=%d"
-                    % (self.__class__.__name__, len(buffer),)
+                    % (
+                        self.__class__.__name__,
+                        len(buffer),
+                    )
                 )
                 continue
 
@@ -817,20 +903,23 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                 )
                 continue
 
-            utils.logger.debug(
-                "[%s] Received %s message from %s:%d, seq=%d, ack=%d, length=%d, icmp_ident=%d, icmp_seq=%d"
-                % (
-                    self.__class__.__name__,
-                    trans_packet.event.decode(),
-                    addr,
-                    trans_packet.server_port,
-                    trans_packet.seq_num,
-                    trans_packet.ack_num,
-                    len(trans_packet.padding),
-                    icmp_packet.ident,
-                    icmp_packet.sequence,
-                )
+            message = "[%s] Received %s message from %s:%d, seq=%d, ack=%d, length=%d, icmp_ident=%d, icmp_seq=%d" % (
+                self.__class__.__name__,
+                trans_packet.event.decode(),
+                addr,
+                trans_packet.server_port,
+                trans_packet.seq_num,
+                trans_packet.ack_num,
+                len(trans_packet.padding),
+                icmp_packet.ident,
+                icmp_packet.sequence,
             )
+            if icmp_packet.ident in self._current_pings:
+                request_time = self._current_pings.pop(icmp_packet.ident)
+                message += ", ping_time=%.2fs" % (time.time() - request_time)
+
+            utils.logger.debug(message)
+
             self._session_stream.on_message_received(trans_packet)
 
             if self._status in (
@@ -907,7 +996,8 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
             raise utils.TimeoutError("Connect to %s:%d timeout" % address)
 
     async def ping_task(self):
-        last_ping_time = 0
+        min_ping_concurrency = 1
+        ping_concurrency = min_ping_concurrency
         while True:
             idle_time = time.time() - self._session_stream.last_alive_time
             if idle_time >= self.__class__.PING_TIMEOUT * 3:
@@ -918,7 +1008,7 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                     "[%s] Connection %s:%d => %s:%d ping timeout: %.2fs"
                     % (
                         self.__class__.__name__,
-                        self._local_address[0],
+                        self._local_address[0] or "0.0.0.0",
                         self._local_address[1],
                         self._remote_address[0],
                         self._remote_address[1],
@@ -926,11 +1016,40 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                     )
                 )
                 return
-            elif time.time() - last_ping_time >= self.__class__.PING_INTERVAL:
-                await self.send(
-                    ICMPTransportPacket.EVENT_PING, msg_seq=0, wait_for_ack=False
-                )
-                last_ping_time = time.time()
+
+            for it in self._current_pings:
+                if (
+                    time.time() - self._current_pings[it]
+                    > self.__class__.PING_INTERVAL + 0.5
+                ):
+                    utils.logger.info(
+                        "[%s] Ping request %d timeout" % (self.__class__.__name__, it)
+                    )
+                    self._current_pings.pop(it)
+                    break
+
+            waiting_time = time.time() - self._session_stream.last_data_time
+            if waiting_time < 0.2:
+                if ping_concurrency < self.__class__.MAX_PING_CONCURRENCY:
+                    ping_concurrency += 1
+                    utils.logger.debug(
+                        "[%s] Ping concurrency changed to %d"
+                        % (self.__class__.__name__, ping_concurrency)
+                    )
+            elif waiting_time > 0.5:
+                if ping_concurrency > min_ping_concurrency:
+                    ping_concurrency -= 1
+                    utils.logger.debug(
+                        "[%s] Ping concurrency changed to %d"
+                        % (self.__class__.__name__, ping_concurrency)
+                    )
+
+            current_pings = self._current_pings
+            if len(current_pings) < ping_concurrency:
+                for _ in range(ping_concurrency - len(current_pings)):
+                    await self.send(
+                        ICMPTransportPacket.EVENT_PING, msg_seq=0, wait_for_ack=False
+                    )
 
             await asyncio.sleep(0.1)
 
@@ -951,14 +1070,10 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
         self._stream_handler_cls = stream_handler_cls
         self._listen_address = None
         self._sessmgr = SessionStreamManager()
-        self._response_slots = []
 
     async def send(
         self, session_stream, event, buffer=b"", msg_seq=None, wait_for_ack=True
     ):
-        if event == ICMPTransportPacket.EVENT_PONG and not session_stream.has_response_slot():
-            utils.logger.info("[%s] Ignore send pong packet" % self.__class__.__name__)
-            return
         if msg_seq is None:
             msg_seq = session_stream.next_seq
         ack_num = session_stream.next_ack
@@ -1065,7 +1180,8 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
 
                     async def _handle_new_stream():
                         await self.send(
-                            session_stream, ICMPTransportPacket.EVENT_OK,
+                            session_stream,
+                            ICMPTransportPacket.EVENT_OK,
                         )
                         await self._stream_handler_cls().handle_session_stream(
                             session_stream
@@ -1075,7 +1191,10 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
                     session_stream.status = ICMPTransportSocket.STATUS_ESTABLISHED
                 else:
                     utils.safe_ensure_future(
-                        self.send(session_stream, ICMPTransportPacket.EVENT_FAIL,)
+                        self.send(
+                            session_stream,
+                            ICMPTransportPacket.EVENT_FAIL,
+                        )
                     )
                     session_stream.status = ICMPTransportSocket.STATUS_DISCONNECT
             else:
@@ -1105,7 +1224,10 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
 
                 if trans_packet.event == ICMPTransportPacket.EVENT_PING:
                     utils.safe_ensure_future(
-                        session_stream.delay_ack(0, self.__class__.PING_INTERVAL,)
+                        session_stream.delay_ack(
+                            0,
+                            self.__class__.PING_INTERVAL,
+                        )
                     )
                 elif trans_packet.event == ICMPTransportPacket.EVENT_WRITE:
                     pass
@@ -1274,12 +1396,13 @@ class ICMPTunnelStreamManager(object):
                 else self._session_stream.server_address
             )
             utils.logger.debug(
-                "[%s] Received %s message from %s:%d"
+                "[%s] Received %s message from %s:%d, size=%d"
                 % (
                     self.__class__.__name__,
-                    stream_packet.event,
+                    stream_packet.event.upper(),
                     source_address[0],
                     source_address[1],
+                    len(buff),
                 )
             )
             if stream_packet.event == StreamForwardPacket.EVENT_CREATE:
