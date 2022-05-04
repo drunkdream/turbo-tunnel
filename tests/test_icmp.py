@@ -10,6 +10,9 @@ disable_ping_file = "/proc/sys/net/ipv4/icmp_echo_ignore_all"
 
 
 def root_required(func):
+    if sys.platform != "linux":
+        print("Unsupported system %s" % sys.platform, file=sys.stderr)
+        return
     if os.getuid() != 0:
         print(
             "Ignore run function %s when run as user %d" % (func.__name__, os.getuid()),
