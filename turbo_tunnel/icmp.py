@@ -7,6 +7,7 @@ import asyncio
 import random
 import socket
 import struct
+import sys
 import time
 
 import msgpack
@@ -131,12 +132,10 @@ class AsyncICMPSocket(object):
                 socket.SOCK_RAW,
                 socket.getprotobyname("icmp"),
             )
+            if sys.platform == "win32":
+                self._sock.bind(("0.0.0.0", 0))
         except PermissionError:
             raise RuntimeError("Raw socket need root permission")
-        except:
-            import traceback
-
-            traceback.print_exc()
         else:
             self._sock.setblocking(False)
         self._transport = None
@@ -481,7 +480,7 @@ class ICMPSessionStream(object):
         while not self._response_slots:
             await asyncio.sleep(0.005)
             if time.time() - start_time >= 10:
-                raise RuntimeError("Waiting for response slot too slow")
+                utils.logger.warning("[%s] Waiting for response slot too slow" % self.__class__.__name__)
         waiting_time = time.time() - start_time
         if waiting_time >= 0.2:
             utils.logger.warning(
@@ -584,7 +583,7 @@ class SessionStreamManager(object):
 
 class ICMPTransportSocket(object):
 
-    DEFAULT_WINDOW_SIZE = 10
+    MAX_WINDOW_SIZE = 5
     ACK_TIMEOUT = 2
     SEND_TIMEOUT = 60
 
@@ -616,6 +615,7 @@ class ICMPTransportSocket(object):
         icmp_ident=None,
         icmp_seq=None,
         wait_for_ack=True,
+        priority=0
     ):
         self._sending_buffers.append(
             {
@@ -629,9 +629,10 @@ class ICMPTransportSocket(object):
                 "icmp_seq": icmp_seq,
                 "wait_for_ack": wait_for_ack,
                 "count": 0,
+                "priority": priority
             }
         )
-        if len(self._sending_buffers) > 5:
+        if len(self._sending_buffers) >= self.__class__.MAX_WINDOW_SIZE:
             utils.logger.info(
                 "[%s] There is %d messages in sending buffers"
                 % (self.__class__.__name__, len(self._sending_buffers))
@@ -690,13 +691,14 @@ class ICMPTransportSocket(object):
                     break
             else:
                 # message not found in sending buffers
-                return
+                return True
             await asyncio.sleep(0.005)
         else:
-            raise utils.TimeoutError(
-                "Waiting for ack of message %d from %s:%d timeout"
-                % (msg_seq, address[0], address[1])
+            utils.logger.error(
+                "[%s] Waiting for ack of message %d from %s:%d timeout"
+                % (self.__class__.__name__, msg_seq, address[0], address[1])
             )
+            return False
 
     async def send_packets_task(self):
         send_times = {}
@@ -705,45 +707,46 @@ class ICMPTransportSocket(object):
             if not self._sending_buffers:
                 await asyncio.sleep(0.005)
 
-            if self._unack_packets < self.__class__.DEFAULT_WINDOW_SIZE:
-                for message in self._sending_buffers:
-                    if time.time() - message["timestamp"] < self.__class__.ACK_TIMEOUT:
-                        continue
-                    if message["address"][0] not in send_times:
-                        send_times[message["address"][0]] = 0
-                    if (
-                        time.time() - send_times[message["address"][0]]
-                        < min_send_interval
-                    ):
-                        continue
-                    if message["count"] > 0:
-                        utils.logger.info(
-                            "[%s] Resend message %d to %s, count=%d"
-                            % (
-                                self.__class__.__name__,
-                                message["msg_seq"],
-                                message["address"][0],
-                                message["count"]
-                            )
+            for message in self._sending_buffers:
+                if message["priority"] == 0 and self._unack_packets >= self.__class__.MAX_WINDOW_SIZE:
+                    continue
+                if time.time() - message["timestamp"] < self.__class__.ACK_TIMEOUT:
+                    continue
+                if message["address"][0] not in send_times:
+                    send_times[message["address"][0]] = 0
+                if (
+                    time.time() - send_times[message["address"][0]]
+                    < min_send_interval
+                ):
+                    continue
+                if message["count"] > 0:
+                    utils.logger.info(
+                        "[%s] Resend message %d to %s, count=%d"
+                        % (
+                            self.__class__.__name__,
+                            message["msg_seq"],
+                            message["address"][0],
+                            message["count"]
                         )
-                    self._sock.sendto(
-                        message["buffer"],
-                        message["address"][0],
-                        type=message["icmp_type"],
-                        code=message["icmp_code"],
-                        ident=message["icmp_ident"],
-                        seq=message["icmp_seq"],
                     )
-                    send_times[message["address"][0]] = time.time()
-                    if message["msg_seq"] and message["wait_for_ack"]:
-                        self._last_send_times[message["address"]] = message[
-                            "timestamp"
-                        ] = time.time()
-                        message["count"] += 1
-                        self._unack_packets += 1
-                    else:
-                        self._sending_buffers.remove(message)
-                        break
+                self._sock.sendto(
+                    message["buffer"],
+                    message["address"][0],
+                    type=message["icmp_type"],
+                    code=message["icmp_code"],
+                    ident=message["icmp_ident"],
+                    seq=message["icmp_seq"],
+                )
+                send_times[message["address"][0]] = time.time()
+                if message["msg_seq"] and message["wait_for_ack"]:
+                    self._last_send_times[message["address"]] = message[
+                        "timestamp"
+                    ] = time.time()
+                    message["count"] += 1
+                    self._unack_packets += 1
+                else:
+                    self._sending_buffers.remove(message)
+                    break
             await asyncio.sleep(0.005)
 
     async def send(
@@ -783,6 +786,9 @@ class ICMPTransportSocket(object):
         )
         icmp_code = EnumICMPEchoCode.NO_CODE
         address = (address, client_port if self._server_side else server_port)
+        priority = 0
+        if event == ICMPTransportPacket.EVENT_PING:
+            priority = 10
         self.enqueue_sending_buffers(
             address,
             msg_seq,
@@ -792,7 +798,11 @@ class ICMPTransportSocket(object):
             icmp_code,
             icmp_ident,
             icmp_seq,
+            priority=priority
         )
+
+        while priority == 0 and len(self._sending_buffers) >= self.__class__.MAX_WINDOW_SIZE:
+            await asyncio.sleep(0.1)
 
         if msg_seq != 0 and wait_for_ack:
             utils.safe_ensure_future(
@@ -1275,9 +1285,6 @@ class StreamForwardPacket(object):
             )
         buffer_len = struct.unpack("!I", buffer[:4])[0]
         if len(buffer) - 4 != buffer_len:
-            import traceback
-
-            traceback.print_stack()
             raise utils.TunnelPacketLengthError(
                 "Invalid stream forward packet length: %d vs %d"
                 % (buffer_len + 4, len(buffer))
