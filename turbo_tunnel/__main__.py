@@ -11,6 +11,8 @@ import sys
 
 import tornado.ioloop
 
+from . import BANNER
+from . import VERSION
 from . import conf
 from . import registry
 from . import route
@@ -98,8 +100,9 @@ async def async_main(args):
 
 
 def main():
+    print(BANNER)
     parser = argparse.ArgumentParser(
-        prog="turbo-tunnel", description="TurboTunnel cmdline tool."
+        prog="turbo-tunnel", description="TurboTunnel cmdline tool v%s" % VERSION
     )
     parser.add_argument("-c", "--config", help="config yaml file path")
     parser.add_argument("-l", "--listen", help="listen url")
@@ -122,6 +125,7 @@ def main():
         "-d", "--daemon", help="run as daemon", action="store_true", default=False
     )
     parser.add_argument("-p", "--plugin", help="load plugin", action="append")
+    parser.add_argument("-V", "--version", help="show current version", action="store_true", default=False)
 
     args = sys.argv[1:]
     if not args:
@@ -129,6 +133,10 @@ def main():
         return 0
 
     args = parser.parse_args(args)
+
+    if args.version:
+        print("v%s" % VERSION)
+        return 0
 
     if sys.platform != "win32" and args.daemon:
         import daemon
