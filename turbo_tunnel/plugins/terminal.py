@@ -8,6 +8,7 @@ import sys
 import time
 
 from . import Plugin
+from .. import BANNER
 from ..registry import plugin_registry
 from ..utils import logger
 
@@ -180,15 +181,8 @@ class TerminalPlugin(Plugin):
         return origin_stdout, origin_stderr
 
     def on_load(self):
-        title = r'''
- _____            _          _____                        _ 
-/__   \_   _ _ __| |__   ___/__   \_   _ _ __  _ __   ___| |
-  / /\/ | | | '__| '_ \ / _ \ / /\/ | | | '_ \| '_ \ / _ \ |
- / /  | |_| | |  | |_) | (_) / /  | |_| | | | | | | |  __/ |
- \/    \__,_|_|  |_.__/ \___/\/    \__,_|_| |_|_| |_|\___|_|                                                      
-'''
         origin_stdout, _ = self._patch_output()
-        self._term_tab = TerminalTable(title, [{
+        self._term_tab = TerminalTable(BANNER, [{
             'title': 'Source Address',
             'width': 18,
             'align': 'left',
