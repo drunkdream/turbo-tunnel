@@ -3,7 +3,7 @@
 """Turbo tunnel
 """
 
-VERSION = "0.15.2"
+VERSION = "0.16.0"
 BANNER = r"""
  _____            _          _____                        _
 /__   \_   _ _ __| |__   ___/__   \_   _ _ __  _ __   ___| |
@@ -18,6 +18,7 @@ import traceback
 try:
     from . import https
     from . import icmp
+    from . import k8s
     from . import server
     from . import socks
 
