@@ -3,10 +3,44 @@
 """
 """
 
+import os
 import random
 import socket
+import ssl
 
 import tornado.tcpserver
+import tornado.websocket
+
+
+class MockK8SWebSocketHandler(tornado.websocket.WebSocketHandler):
+    async def open(self, *args, **kwargs):
+        print("[%s] Connection opened" % self.__class__.__name__)
+        await self.write_message(b"\x02[OKAY]\n", True)
+
+    async def on_message(self, message):
+        if message[0] != 0:
+            raise RuntimeError("Invalid message: %r" % message)
+        message = message[1:]
+        print("[%s] Recevied message: %r" % (self.__class__.__name__, message))
+        await self.write_message(b"\x01" + message, True)
+
+
+def start_mock_k8s_websocket_server(port):
+    res_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "res")
+    handlers = [
+        ("/api/v1/namespaces/default/pods/pod-1/exec", MockK8SWebSocketHandler),
+    ]
+    app = tornado.web.Application(handlers)
+    app.listen(
+        port,
+        "127.0.0.1",
+        ssl_options={
+            "certfile": os.path.join(res_dir, "server.crt"),
+            "keyfile": os.path.join(res_dir, "server.key"),
+            "cert_reqs": ssl.CERT_REQUIRED,
+            "ca_certs": os.path.join(res_dir, "ca.crt"),
+        },
+    )
 
 
 class DemoTCPServer(tornado.tcpserver.TCPServer):
@@ -101,6 +135,8 @@ rules:
     tunnel: block
 
 """
+
+
 def get_random_port():
     while True:
         port = random.randint(10000, 65000)
