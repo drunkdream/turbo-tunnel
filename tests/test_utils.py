@@ -48,12 +48,12 @@ async def test_async_task_manager():
     async_task_mgr = utils.AsyncTaskManager()
     async_task_mgr1 = utils.AsyncTaskManager()
     assert async_task_mgr == async_task_mgr1
-    curr_tasks = len(async_task_mgr.running_tasks)
-    async_task_mgr.start_task(task())
+    _task = task()
+    async_task_mgr.start_task(_task)
     await asyncio.sleep(0.1)
-    assert len(async_task_mgr.running_tasks) == curr_tasks + 1
+    assert _task in async_task_mgr.running_tasks
     await asyncio.sleep(2)
-    assert len(async_task_mgr.running_tasks) == curr_tasks
+    assert _task not in async_task_mgr.running_tasks
 
 
 async def test_wait_for_tasks():
@@ -64,9 +64,10 @@ async def test_wait_for_tasks():
         await asyncio.sleep(3)
 
     async_task_mgr = utils.AsyncTaskManager()
-    curr_tasks = len(async_task_mgr.running_tasks)
-    await async_task_mgr.wait_for_tasks([task1(), task2()])
-    assert len(async_task_mgr.running_tasks) == curr_tasks
+    tasks = [task1(), task2()]
+    await async_task_mgr.wait_for_tasks(tasks)
+    assert tasks[0] not in async_task_mgr.running_tasks
+    assert tasks[1] not in async_task_mgr.running_tasks
 
 
 async def test_resolve_address():
