@@ -129,7 +129,9 @@ class Url(object):
                 for it in self._params[key]:
                     items.append("%s=%s" % (key, urllib.parse.quote(it)))
             else:
-                items.append("%s=%s" % (key, urllib.parse.quote(self._params[key])))
+                items.append(
+                    "%s=%s" % (key, urllib.parse.quote(str(self._params[key])))
+                )
         return "&".join(items)
 
     @property
