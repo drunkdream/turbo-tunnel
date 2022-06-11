@@ -123,7 +123,16 @@ class Url(object):
     def query(self):
         if self._params is None:
             return self._query
-        return "&".join(["%s=%s" % (key, self._params[key]) for key in self._params])
+        items = []
+        for key in self._params:
+            if isinstance(self._params[key], list):
+                for it in self._params[key]:
+                    items.append("%s=%s" % (key, urllib.parse.quote(it)))
+            else:
+                items.append(
+                    "%s=%s" % (key, urllib.parse.quote(str(self._params[key])))
+                )
+        return "&".join(items)
 
     @property
     def params(self):
@@ -135,8 +144,10 @@ class Url(object):
                     if "=" not in item:
                         continue
                     key, value = item.split("=", 1)
-                    if key in result and not isinstance(result[key], list):
-                        result[key] = [result[key]]
+                    if key in result:
+                        if not isinstance(result[key], list):
+                            result[key] = [result[key]]
+                        result[key].append(urllib.parse.unquote(value))
                     else:
                         result[key] = urllib.parse.unquote(value)
             self._params = result

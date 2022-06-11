@@ -3,8 +3,6 @@
 import socket
 from unittest.mock import patch
 
-import pytest
-
 from turbo_tunnel import conf
 from .util import conf_yaml, conf_yaml2
 

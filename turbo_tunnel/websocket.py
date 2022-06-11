@@ -21,7 +21,16 @@ from . import utils
 class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
     """WebSocket Client Support using exist connection"""
 
-    def __init__(self, tunnel, url, headers=None, timeout=15):
+    def __init__(
+        self,
+        tunnel,
+        url,
+        headers=None,
+        client_cert=None,
+        client_key=None,
+        ca_cert=None,
+        timeout=15,
+    ):
         self._tunnel = tunnel
         self._url = url
         self._connected = None
@@ -31,7 +40,13 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         if isinstance(headers, dict):
             headers = tornado.httputil.HTTPHeaders(headers)
         request = tornado.httpclient.HTTPRequest(
-            self._url, headers=headers, connect_timeout=timeout, request_timeout=timeout
+            self._url,
+            headers=headers,
+            connect_timeout=timeout,
+            request_timeout=timeout,
+            ca_certs=ca_cert,
+            client_key=client_key,
+            client_cert=client_cert,
         )
         request = tornado.httpclient._RequestProxy(
             request, tornado.httpclient.HTTPRequest._DEFAULTS
@@ -43,7 +58,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         )
         self._patcher = self._patch_tcp_client(self._tunnel)
         self._patcher.patch()
-        self._buffer = bytearray()
+        self._buffers = []
         self._read_event = asyncio.Event()
 
     def _patch_tcp_client(self, tunn):
@@ -109,7 +124,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         if not message:
             self._closed = True
         else:
-            self._buffer += message
+            self._buffers.append(message)
         self._read_event.set()
 
     async def wait_for_connecting(self):
@@ -128,14 +143,12 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             return False
 
     async def read(self):
-        while not self._buffer:
+        while not self._buffers:
             if self._closed:
                 raise utils.TunnelClosedError(self)
             await self._read_event.wait()
             self._read_event.clear()
-        buffer = self._buffer
-        self._buffer = bytearray()
-        return buffer
+        return self._buffers.pop(0)
 
     async def write(self, buffer):
         try:
@@ -161,8 +174,16 @@ class WebSocketTunnel(tunnel.Tunnel):
             headers["Proxy-Authorization"] = "Basic %s" % auth.http_basic_auth(
                 *auth_data.split(":")
             )
+        ca_cert = self._url.params.pop("ca_cert", None)
+        client_key = self._url.params.pop("client_key", None)
+        client_cert = self._url.params.pop("client_cert", None)
         self._upstream = WebSocketTunnelConnection(
-            self._tunnel, str(self._url), headers
+            self._tunnel,
+            str(self._url),
+            headers,
+            client_cert=client_cert,
+            client_key=client_key,
+            ca_cert=ca_cert,
         )
         return await self._upstream.wait_for_connecting()
 
