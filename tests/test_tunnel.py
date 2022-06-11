@@ -25,10 +25,10 @@ async def test_tcp_tunnel():
 
 
 async def test_ssl_tunnel():
-    current_dir = os.path.dirname(os.path.abspath(__file__))
+    res_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "res")
     ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
     ssl_ctx.load_cert_chain(
-        os.path.join(current_dir, "test.crt"), os.path.join(current_dir, "test.key")
+        os.path.join(res_dir, "server.crt"), os.path.join(res_dir, "server.key")
     )
     server = DemoTCPServer(ssl_options=ssl_ctx)
     port = get_random_port()

@@ -31,6 +31,9 @@ def test_url():
     assert url.query == "p=123"
     assert str(url) == "http://www.qq.com/test?p=123"
 
+    url = utils.Url("http://www.qq.com:8080/test?p=1&p=2&p=3")
+    assert url.params["p"] == ["1", "2", "3"]
+
     url = utils.Url("tcp://:8080/")
     assert url.host == "0.0.0.0"
 
