@@ -1556,6 +1556,8 @@ class ICMPTunnel(tunnel.Tunnel):
             return False
 
     async def write(self, buffer):
+        if not isinstance(buffer, bytes):
+            buffer = buffer.encode()
         return await self._stream.write(buffer)
 
     async def read(self):
