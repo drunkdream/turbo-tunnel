@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import os
 import random
 import socket
 import struct
@@ -480,7 +481,9 @@ class ICMPSessionStream(object):
         while not self._response_slots:
             await asyncio.sleep(0.005)
             if time.time() - start_time >= 10:
-                utils.logger.warning("[%s] Waiting for response slot too slow" % self.__class__.__name__)
+                utils.logger.warning(
+                    "[%s] Waiting for response slot too slow" % self.__class__.__name__
+                )
         waiting_time = time.time() - start_time
         if waiting_time >= 0.2:
             utils.logger.warning(
@@ -615,7 +618,7 @@ class ICMPTransportSocket(object):
         icmp_ident=None,
         icmp_seq=None,
         wait_for_ack=True,
-        priority=0
+        priority=0,
     ):
         self._sending_buffers.append(
             {
@@ -629,7 +632,7 @@ class ICMPTransportSocket(object):
                 "icmp_seq": icmp_seq,
                 "wait_for_ack": wait_for_ack,
                 "count": 0,
-                "priority": priority
+                "priority": priority,
             }
         )
         if len(self._sending_buffers) >= self.__class__.MAX_WINDOW_SIZE:
@@ -708,16 +711,16 @@ class ICMPTransportSocket(object):
                 await asyncio.sleep(0.005)
 
             for message in self._sending_buffers:
-                if message["priority"] == 0 and self._unack_packets >= self.__class__.MAX_WINDOW_SIZE:
+                if (
+                    message["priority"] == 0
+                    and self._unack_packets >= self.__class__.MAX_WINDOW_SIZE
+                ):
                     continue
                 if time.time() - message["timestamp"] < self.__class__.ACK_TIMEOUT:
                     continue
                 if message["address"][0] not in send_times:
                     send_times[message["address"][0]] = 0
-                if (
-                    time.time() - send_times[message["address"][0]]
-                    < min_send_interval
-                ):
+                if time.time() - send_times[message["address"][0]] < min_send_interval:
                     continue
                 if message["count"] > 0:
                     utils.logger.info(
@@ -726,7 +729,7 @@ class ICMPTransportSocket(object):
                             self.__class__.__name__,
                             message["msg_seq"],
                             message["address"][0],
-                            message["count"]
+                            message["count"],
                         )
                     )
                 self._sock.sendto(
@@ -798,10 +801,13 @@ class ICMPTransportSocket(object):
             icmp_code,
             icmp_ident,
             icmp_seq,
-            priority=priority
+            priority=priority,
         )
 
-        while priority == 0 and len(self._sending_buffers) >= self.__class__.MAX_WINDOW_SIZE:
+        while (
+            priority == 0
+            and len(self._sending_buffers) >= self.__class__.MAX_WINDOW_SIZE
+        ):
             await asyncio.sleep(0.1)
 
         if msg_seq != 0 and wait_for_ack:
@@ -1623,6 +1629,15 @@ class ICMPTunnelServer(server.TunnelServer):
         self._server = ICMPTransportServerSocket(ICMPForwardStreamHandler)
 
     def start(self):
+        if sys.platform != "linux":
+            raise NotImplementedError("System %s not supported" % sys.platform)
+        disable_ping_file = "/proc/sys/net/ipv4/icmp_echo_ignore_all"
+        with open(disable_ping_file) as fp:
+            text = fp.read()
+        if text.strip() == "0":
+            utils.logger.info("Disable icmp echo replay")
+            with open(disable_ping_file, "w") as fp:
+                fp.write("1")
         utils.safe_ensure_future(
             self._server.listen((self._listen_url.host, self._listen_url.port))
         )
