@@ -261,6 +261,7 @@ class ICMPTransportPacket(object):
     EVENT_PING = b"PING"
     EVENT_PONG = b"PONG"
     EVENT_CLOSE = b"CLSE"
+    EVENT_RESET = b"REST"
     MAX_DATA_SIZE = 1440
 
     def __init__(self, seq, ack, event, client_port, server_port, padding):
@@ -402,10 +403,16 @@ class ICMPSessionStream(object):
     def last_data_time(self):
         return self._last_data_time
 
+    def reset(self):
+        self._status = ICMPTransportSocket.STATUS_DISCONNECT
+        self._recv_event.set()
+
     async def read(self):
         if not self._recv_buffer:
             await self._recv_event.wait()
             self._recv_event.clear()
+        if self._status == ICMPTransportSocket.STATUS_DISCONNECT:
+            raise utils.TunnelClosedError()
         buffer = self._recv_buffer
         self._recv_buffer = b""
         return buffer
@@ -605,6 +612,7 @@ class ICMPTransportSocket(object):
         self._unack_packets = 0
         self._last_acks = {}
         self._last_send_times = {}
+        self._running = True
         utils.safe_ensure_future(self.send_packets_task())
 
     def enqueue_sending_buffers(
@@ -706,7 +714,7 @@ class ICMPTransportSocket(object):
     async def send_packets_task(self):
         send_times = {}
         min_send_interval = 0.005
-        while True:
+        while self._running:
             if not self._sending_buffers:
                 await asyncio.sleep(0.005)
 
@@ -841,6 +849,7 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
 
     async def send(self, event, buffer=b"", msg_seq=None, wait_for_ack=True):
         assert self._session_stream is not None
+        assert self._status != ICMPTransportSocket.STATUS_DISCONNECT
         assert msg_seq is None or isinstance(msg_seq, int)
         if msg_seq is None:
             msg_seq = self._session_stream.next_seq
@@ -884,7 +893,7 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
     async def handling_message_task(self, address):
         icmp_type = EnumICMPType.ECHO_REPLY
         icmp_code = EnumICMPEchoCode.NO_CODE
-        while True:
+        while self._status != ICMPTransportSocket.STATUS_DISCONNECT:
             addr, icmp_packet = await self._sock.recvfrom(
                 address=address, type=icmp_type, code=icmp_code
             )
@@ -974,7 +983,20 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                     )
                     continue
             elif self._status == ICMPTransportSocket.STATUS_ESTABLISHED:
-                if trans_packet.event == ICMPTransportPacket.EVENT_WRITE:
+                if trans_packet.event == ICMPTransportPacket.EVENT_RESET:
+                    utils.logger.warning(
+                        "[%s] Connection %s:%d => %s:%d received RESET event"
+                        % (
+                            self.__class__.__name__,
+                            self._local_address[0] or "0.0.0.0",
+                            self._local_address[1],
+                            self._remote_address[0],
+                            self._remote_address[1],
+                        )
+                    )
+                    self._session_stream.reset()
+                    self._status = ICMPTransportSocket.STATUS_DISCONNECT
+                elif trans_packet.event == ICMPTransportPacket.EVENT_WRITE:
                     self._session_stream.on_data_received(
                         trans_packet.seq_num, trans_packet.padding
                     )
@@ -988,6 +1010,8 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                         % (self.__class__.__name__, trans_packet.event.decode())
                     )
                     continue
+        self._running = False
+        utils.logger.info("[%s] Handling message task exit" % self.__class__.__name__)
 
     async def connect(self, address, timeout=10):
         assert self._remote_address is None
@@ -999,7 +1023,7 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
         )
         utils.safe_ensure_future(self.handling_message_task(self._remote_address[0]))
         self._status = ICMPTransportSocket.STATUS_CONNECTING
-        time0 = time.time()
+        last_send_time = time0 = time.time()
         await self.send(ICMPTransportPacket.EVENT_CONNECT)
         while time.time() - time0 < timeout:
             if self._status == ICMPTransportSocket.STATUS_ESTABLISHED:
@@ -1007,14 +1031,17 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                 return True
             elif self._status == ICMPTransportSocket.STATUS_DISCONNECT:
                 return False
+            if time.time() - last_send_time >= 1:
+                await self.send(ICMPTransportPacket.EVENT_CONNECT)
+                last_send_time = time.time()
             await asyncio.sleep(0.005)
         else:
-            raise utils.TimeoutError("Connect to %s:%d timeout" % address)
+            return False
 
     async def ping_task(self):
         min_ping_concurrency = 1
         ping_concurrency = min_ping_concurrency
-        while True:
+        while self._status == ICMPTransportSocket.STATUS_ESTABLISHED:
             idle_time = time.time() - self._session_stream.last_alive_time
             if idle_time >= self.__class__.PING_TIMEOUT * 3:
                 # connection timeout
@@ -1068,6 +1095,10 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                     )
 
             await asyncio.sleep(0.1)
+        utils.logger.info(
+            "[%s] Ping task exit, current status is %d"
+            % (self.__class__.__name__, self._status)
+        )
 
     async def recv(self, timeout=None):
         return await self._session_stream.read()
@@ -1127,6 +1158,20 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
                 buffer[offset : offset + ICMPTransportPacket.MAX_DATA_SIZE],
             )
             offset += ICMPTransportPacket.MAX_DATA_SIZE
+
+    async def send_reset(self, client_address, server_address, ident, seq):
+        return await super(ICMPTransportServerSocket, self).send(
+            client_address[0],
+            0,
+            0,
+            ICMPTransportPacket.EVENT_RESET,
+            client_address[1],
+            server_address[1],
+            b"",
+            icmp_ident=ident,
+            icmp_seq=seq,
+            wait_for_ack=False,
+        )
 
     async def listen(self, address):
         assert self._listen_address is None
@@ -1227,6 +1272,12 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
                             self._listen_address[0],
                             self._listen_address[1],
                         )
+                    )
+                    await self.send_reset(
+                        (addr, trans_packet.client_port),
+                        self._listen_address,
+                        icmp_packet.ident,
+                        icmp_packet.sequence,
                     )
                     continue
                 session_stream.on_message_received(trans_packet)
@@ -1373,6 +1424,18 @@ class ICMPTunnelStreamManager(object):
         time0 = time.time()
         key = "%s:%d" % address
         while time.time() - time0 < timeout:
+            if not self._running:
+                utils.logger.warning(
+                    "[%s] Session stream %s:%d => %s:%d closed"
+                    % (
+                        self.__class__.__name__,
+                        self._session_stream.client_address[0] or "0.0.0.0",
+                        self._session_stream.client_address[1],
+                        self._session_stream.server_address[0],
+                        self._session_stream.server_address[1],
+                    )
+                )
+                return -1
             if key in self._streams:
                 return self._streams.pop(key)
             await self._event.wait()
@@ -1394,7 +1457,12 @@ class ICMPTunnelStreamManager(object):
     async def handle_session_stream(self):
         buffer = b""
         while self._running:
-            buffer += await self._session_stream.read()
+            try:
+                buffer += await self._session_stream.read()
+            except utils.TunnelClosedError:
+                self._running = False
+                self._event.set()
+                break
             if len(buffer) < 5:
                 continue
             buffer_len = struct.unpack("!I", buffer[:4])[0]
@@ -1539,7 +1607,8 @@ class ICMPTunnel(tunnel.Tunnel):
             ICMPTransportSocket.STATUS_NOT_CONNECT,
             ICMPTransportSocket.STATUS_DISCONNECT,
         ):
-            await self._sock.connect(self._url.address, self._timeout)
+            if not await self._sock.connect(self._url.address, self._timeout):
+                return False
             self.__class__.icmp_socks[key] = self._sock
             stream_manager = ICMPTunnelStreamManager(self._sock.session_stream, False)
             utils.safe_ensure_future(stream_manager.handle_session_stream())
