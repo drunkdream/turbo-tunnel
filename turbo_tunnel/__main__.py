@@ -8,6 +8,7 @@ import logging
 import logging.handlers
 import os
 import sys
+import traceback
 
 import tornado.ioloop
 
@@ -147,7 +148,24 @@ def main():
         utils.win32_daemon()
         return 0
 
-    utils.safe_ensure_future(async_main(args))
+    asyncio.ensure_future(async_main(args))
+
+    def handle_exception(loop, context):
+        print("Exception caught:\n", file=sys.stderr)
+        message = context["message"]
+        exp = context.get("exception")
+        if exp:
+            message = "".join(
+                traceback.format_exception(
+                    etype=type(exp), value=exp, tb=exp.__traceback__
+                )
+            )
+        print(message, file=sys.stderr)
+        loop.stop()
+
+    loop = asyncio.get_event_loop()
+    loop.set_exception_handler(handle_exception)
+
     try:
         tornado.ioloop.IOLoop.current().start()
     except KeyboardInterrupt:
