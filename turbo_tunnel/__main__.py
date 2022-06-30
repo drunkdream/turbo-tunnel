@@ -21,7 +21,7 @@ from . import server
 from . import utils
 
 
-async def async_main(args):
+def handle_args(args):
 
     if args.plugin:
         for plugin in args.plugin:
@@ -41,7 +41,8 @@ async def async_main(args):
             print("Config file %s not exist" % args.config, file=sys.stderr)
             return -1
         config = conf.TunnelConfiguration(args.config, auto_reload=args.auto_reload)
-        await config.load()
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(config.load())
         router = route.TunnelRouter(config)
         for listen_url in config.listen_urls:
             tunnel_server = server.TunnelServer(listen_url, router)
@@ -148,7 +149,7 @@ def main():
         utils.win32_daemon()
         return 0
 
-    asyncio.ensure_future(async_main(args))
+    handle_args(args)
 
     def handle_exception(loop, context):
         print("Exception caught:\n", file=sys.stderr)

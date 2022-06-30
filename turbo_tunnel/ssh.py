@@ -5,6 +5,7 @@
 import asyncio
 import ctypes
 import os
+import platform
 import shlex
 import socket
 import struct
@@ -23,7 +24,8 @@ from . import utils
 class MicroSSHServer(asyncssh.SSHServer):
     """Micro SSH Server"""
 
-    welcome = b"""Welcome to turbo-tunnel micro ssh server\n\n"""
+    barrier = b"=" * 80
+    welcome = b"""Welcome to turbo-tunnel micro ssh server\r\n"""
 
     def __init__(
         self, listen_address, server_host_keys, username, password=None, public_key=None
@@ -35,6 +37,10 @@ class MicroSSHServer(asyncssh.SSHServer):
         self._public_key = public_key
         self._conn = None
         self._hostname = socket.gethostname()
+        self._pty_enabled = sys.platform != "win32" or hasattr(
+            ctypes.windll.kernel32, "CreatePseudoConsole"
+        )
+        self._line_editor = not self._pty_enabled
 
     def connection_made(self, conn):
         """Record connection object for later use"""
@@ -89,7 +95,7 @@ class MicroSSHServer(asyncssh.SSHServer):
             stderr = proc.stderr
         else:
             if sys.platform == "win32":
-                if hasattr(ctypes.windll.kernel32, "CreatePseudoConsole"):
+                if self._pty_enabled:
                     cmd = (
                         "conhost.exe",
                         "--headless",
@@ -139,6 +145,12 @@ class MicroSSHServer(asyncssh.SSHServer):
                     stderr = None
         return proc, stdin, stdout, stderr
 
+    def _handle_output(self, buffer):
+        if self._line_editor:
+            return buffer.decode("utf-8")
+        else:
+            return buffer
+
     async def _handle_process(self, process):
         username = process.get_extra_info("username")
         interactive = process.get_terminal_type() is not None
@@ -155,7 +167,16 @@ class MicroSSHServer(asyncssh.SSHServer):
             interactive, process.command, (width, height)
         )
         if interactive:
-            process.stdout.write(self.welcome)
+            process.stdout.write(self._handle_output(self.barrier + b"\r\n"))
+            process.stdout.write(self._handle_output(self.welcome))
+            if not self._pty_enabled:
+                process.stdout.write(
+                    self._handle_output(
+                        b"PTY not supported on %s, limited capability supported\r\n\r\n"
+                        % platform.platform().encode()
+                    )
+                )
+            process.stdout.write(self._handle_output(self.barrier + b"\r\n\r\n"))
 
         tasks = [None, None]
         if stderr:
@@ -189,15 +210,27 @@ class MicroSSHServer(asyncssh.SSHServer):
                     return -1
 
                 if index == 0:
+                    if not isinstance(buffer, bytes):
+                        buffer = buffer.encode("utf-8")
                     if buffer.endswith(b"\r") and sys.platform == "win32":
                         buffer += b"\n"
 
                     stdin.write(buffer)
-                elif index == 1:
-                    process.stdout.write(buffer)
                 else:
-                    buffer = buffer.replace(b"\r\n", b"\r").replace(b"\r", b"\r\n")
-                    process.stderr.write(buffer)
+                    if not self._pty_enabled:
+                        for encoding in ("utf-8", "gbk"):
+                            try:
+                                buffer = buffer.decode(encoding)
+                            except:
+                                continue
+                            else:
+                                buffer = buffer.encode("utf8")
+                                break
+                    if index == 1:
+                        process.stdout.write(self._handle_output(buffer))
+                    else:
+                        buffer = buffer.replace(b"\r\n", b"\r").replace(b"\r", b"\r\n")
+                        process.stderr.write(self._handle_output(buffer))
 
         return proc.returncode
 
@@ -214,9 +247,8 @@ class MicroSSHServer(asyncssh.SSHServer):
             process.exit(-1)
 
     async def start(self):
-        line_editor = sys.platform == "win32" and not hasattr(
-            ctypes.windll.kernel32, "CreatePseudoConsole"
-        )
+        if self._line_editor:
+            utils.logger.info("[%s] Line editor mode enabled" % self.__class__.__name__)
         try:
             self._conn = await asyncssh.create_server(
                 lambda: MicroSSHServer(
@@ -232,8 +264,8 @@ class MicroSSHServer(asyncssh.SSHServer):
                 process_factory=lambda process: asyncio.ensure_future(
                     self.handle_process(process)
                 ),
-                encoding=None,
-                line_editor=line_editor,
+                encoding="utf-8" if self._line_editor else None,
+                line_editor=self._line_editor,
             )
         except OSError as e:
             utils.logger.error(
