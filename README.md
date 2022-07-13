@@ -10,119 +10,125 @@
 ![Unittest](https://github.com/drunkdream/turbo-tunnel/workflows/Unittest/badge.svg)
 [![codecov.io](https://codecov.io/github/drunkdream/turbo-tunnel/coverage.svg?branch=master)](https://codecov.io/github/drunkdream/turbo-tunnel)
 
-## 环境要求
+[中文README](./README_zh.md)
 
-- 操作系统： `Windows`、`Linux`、`MacOS`
+## Runtime Environment
+
+- Operating System： `Windows`、`Linux`、`MacOS`
 - Python: `>=3.5`
 
-## 主要功能
+## Primary Function
 
-- 提供访问各种不同隧道/代理服务的能力
-- 支持的隧道/代理服务类型包括：`https`、`socks4`、`socks5`、`websocket`、`ssh`、`icmp`、`k8s`
-- 支持创建的隧道/代理服务类型有：`https`、`socks4`、`socks5`、`websocket`
-- 支持TCP端口映射、SSL端口映射
-- 支持通过配置文件的方式，指定不同的策略，允许使用不同的代理服务访问不同的目标服务
+- Provide access to various tunnel / proxy services
+- Supported tunnel / proxy service types：`https`/`socks4`/`socks5`/`websocket`/`ssh`/`icmp`/`k8s`
+- The types of tunnel / proxy services supported to create：`https`/`socks4`/`socks5`/`websocket`/`ssh`
+- Support TCP port forwarding and SSL port forwarding
+- It supports specifying different policies through configuration file, allowing access different services through different tunnel / proxy services
 
-## 安装方法
-
-```bash
-$ pip3 install turbo-tunnel
-```
-
-## 基本功能介绍
-
-详情请见[中文文档](https://ttun.top/)
-
-### 端口映射
+## Installation
 
 ```bash
-$ turbo-tunnel -l tcp://127.0.0.1:8080 -t tcp://www.qq.com:443
+python3 -m pip install turbo-tunnel
 ```
 
-该命令可以将`www.qq.com`的`443`端口到本地的`8080`端口。
+## Basic Functions
+
+Detail in [Document](https://ttun.top/)
+
+### Port Forwarding
 
 ```bash
-$ turbo-tunnel -l tcp://127.0.0.1:8080 -t http://web-proxy.com:8080 -t tcp://www.qq.com:443
+turbo-tunnel -l tcp://127.0.0.1:8080 -t tcp://www.qq.com:443
 ```
 
-该命令会通过`https`类型的代理服务`web-proxy.com:8080`，将`www.qq.com`的`443`端口到本地的`8080`端口。
-
-如果不写`127.0.0.1`，则默认是`0.0.0.0`。
-
-### 创建代理服务
-
-使用`-l`或`--listen`参数，可以创建代理服务。
-
-- 创建 https 代理服务
+This command can forward `www.qq.com:443` to local `8080` port.
 
 ```bash
-$ turbo-tunnel -l http://username:password@:8080
+turbo-tunnel -l tcp://127.0.0.1:8080 -t http://web-proxy.com:8080 -t tcp://www.qq.com:443
 ```
 
-`username`和`password`是用于鉴权的用户名和密码，不指定则不对客户端鉴权；如果包含特殊字符需要进行`urlencode`。
+This command can forward `www.qq.com:443` to local `8080` port through `https` proxy `web-proxy.com:8080`.
 
-- 创建 socks4 代理服务
+If address is not specified, default is `0.0.0.0`.
+
+### Create Tunnel Server
+
+Use `-l` or `--listen` parameter to create a tunnel server.
+
+- Create https proxy tunnel server
 
 ```bash
-$ turbo-tunnel -l socks4://userid@127.0.0.1:1080
+turbo-tunnel -l http://username:password@:8080
 ```
 
-`socks4://`也可以写成`socks://`，表示默认使用`socks4`协议。
+The variable `username` and `password` is used for authentication. If username and password not specified, authentication will be disabled. If the password include special characters, it should be encoded by `urlencode`. For example, `pwd@123` should be encoded to `pwd%40123`.
 
-`userid`参数用于鉴权，不指定则无需鉴权。
-
-- 创建 WebSocket 代理服务
+- Create socks4 proxy tunnel server
 
 ```bash
-$ turbo-tunnel -l ws://username:password@127.0.0.1/{addr}/{port}
+turbo-tunnel -l socks4://userid@127.0.0.1:1080
 ```
 
-`{addr}`和`{port}`在这里是变量占位符，用于指示`目标地址`和`目标端口`参数。这是因为`WebSocket`协议本身并不是一种代理协议，因此需要使用特定的字段来描述这些信息。运行过程中，当需要访问`1.1.1.1:8888`服务时，客户端会动态生成请求路径：`/1.1.1.1/8888`。
+`socks4://` can also replaced by `socks://`，because `socks4` is the default socks protocol.
 
-这里可以根据自己的需要改成不同的格式，例如：`/proxy-{addr}-{port}`。但是，这里设置的格式需要与客户端指定的 url 格式一致。
+`userid` is used for authentication.
 
-目前没有提供`wss`协议，用户如果需要的话可以配合`nginx`搭建。
-
-### 指定访问通道
-
-通过`-t`或`--tunnel`参数，可以指定访问目标服务器的通道，默认是直连。
-
-- 配置单个通道
+- Create WebSocket proxy tunnel server
 
 ```bash
-$ turbo-tunnel -l http://127.0.0.1:8080 -t wss://username:password@proxy.com/{addr}/{port}
+turbo-tunnel -l ws://username:password@127.0.0.1/proxy/{addr}/{port}
 ```
 
-所有访问本地 https 代理服务的请求都会通过`WebSocket`代理服务进行转发。
+`{addr}`and `{port}` are variable placeholders here, which are used to indicate the parameters of target address and target port. This is due to the WebSocket protocol is not a native proxy protocol, which need specil fields to indicate these information. For example, if the user want to visit `1.1.1.1:8888`, turbo-tunnel will create request path `/proxy/1.1.1.1/8888` dynamically.
 
-> 这种方法可以用作代理协议格式的转换。
+User can change the path to different formats, such as `/proxy-{addr}-{port}`.
 
-- 配置多个通道
+> The client and server `MUST` use the same format.
+
+The `wss` protocol is not supported currently, user can run wss server with `nginx`.
+
+### Config Tunnel Client
+
+With `-t` or `--tunnel` param, turbo-tunnel process can access target server through specified tunnel, default is direct connection.
+
+- Config single tunnel
 
 ```bash
-$ turbo-tunnel -l http://127.0.0.1:8080 -t socks://10.1.1.1:1080 -t ssh://username:password@10.2.2.2:22
+turbo-tunnel -l http://127.0.0.1:8080 -t wss://username:password@proxy.com/{addr}/{port}
 ```
 
-配置多个通道时，会进行代理协议的嵌套，从而依次穿越所有通道，进行目标服务的访问。
+All requests to the https proxy server will be forwarded to the `WebSocket` tunnel server.
 
-### 设置全局透明代理
+> This method can be used to convert tunnel protocol.
 
-创建代理服务后，我们希望程序访问网络时能自动使用代理去访问。此时可以通过配置全局透明代理的方式来解决。
+- Config multiple tunnels
 
-- Windows & MacOS 可以安装`Proxifier`工具，该工具可以配置各种访问策略，访问不同服务时使用不同的代理服务器。
+```bash
+turbo-tunnel -l http://127.0.0.1:8080 -t socks://10.1.1.1:1080 -t ssh://username:password@10.2.2.2:22
+```
 
-- Liunx 可以使用`proxychains`工具，该工具类似于`Proxifier`，但是不能配置策略，而且需要在启动目标应用时在命令前增加`proxychains`前缀。
+When multiple channels configured, the tunnel will be nested. So data packet can cross all tunnels in turn and access the target service.
 
-## 高级用法
+### Config global transparent proxy
 
-### 使用配置文件
+When proxy server is created, program is expected to access network through proxy automatically. This problem can bed solved by configing global transparent proxy.
 
-`-c`或`--config`参数可以指定一个`yaml`格式的配置文件，可以配置服务参数访问策略。下面是一个配置文件的例子：
+- Windows & MacOS can use `Proxifier` tool to config various rules, different rule will be selected to access different server.
+
+- Linux can use `proxychains` tool, which is like `Proxifier`, but can't config rule, and need to add `proxychains` before cmdline.
+
+## Advanced Usage
+
+### Config file
+
+The user can use `-c` or `--config` param to specify a `yaml` format config file, which can config access rules.
+
+Config file example:
 
 ```yaml
 version: 1.0
 
-listen: http://127.0.0.1:6666 # 配置监听地址
+listen: http://127.0.0.1:6666 # Listen address
 
 hosts:
   - domain: www.test.com
@@ -131,21 +137,21 @@ hosts:
 tunnels:
   - id: direct
     url: tcp://
-    default: true # 默认使用直连策略
+    default: true # Default is direct connect
 
   - id: block
-    url: block:// # 禁止访问策略
+    url: block:// # Forbidden rule
 
   - id: web
     url: http://web-proxy.com:8080
 
   - id: private
     url: wss://test:mypassword@ws-proxy.com/proxy/{addr}/{port}
-    dependency: web # 依赖web代理
+    dependency: web # Depend web tunnel
 
 rules:
   - id: local
-    priority: 100 # 优先级，1-100，策略冲突时会选择优先级最高的策略
+    priority: 100 # Priority, 1-100, highest priority rule will be selected when rule conflict
     addr: 127.0.0.1
     tunnel: direct
 
@@ -159,7 +165,7 @@ rules:
     priority: 90
     addr: "*"
     port: 80;443;8080
-    tunnel: web # 访问外网使用web通道
+    tunnel: web # Access public network with web tunnel
 
   - id: private
     priority: 95
@@ -171,19 +177,19 @@ rules:
     priority: 90
     addr: "*.baidu.com"
     port: 80;443
-    tunnel: block # 不允许访问
+    tunnel: block # Connection will be blocked
 ```
 
-### 扩展插件
+### Extend plugin
 
-turbo-tunnel 允许用户开发自己的插件，以支持新的代理服务或通道类型，还可以在运行过程中执行特殊操作，例如：动态修改收发的数据。
+turbo-tunnel is allowing users to develop their own plugins, which can support new proxy server or tunnel. They can also perform special operations, such as dynamically modify sending and receiving data.
 
-目前自带的插件有：
+Built-in plugins:
 
-- terminal: 展示运行过程中的连接情况
+- terminal: Show current active connections
 
 ```bash
-$ turbo-tunnel -l http://127.0.0.1:8080 -p terminal -p xxx
+turbo-tunnel -l http://127.0.0.1:8080 -p terminal -p xxx
 ```
 
-通过`-p`或`--plugin`可以指定`1-N`个插件，插件加载顺序由启动命令行中`-p`参数的顺序决定。
+User can use `-p` or `--plugin` params to specify `1-N` plugins. Plugin load order is decided by `-p` params order.
