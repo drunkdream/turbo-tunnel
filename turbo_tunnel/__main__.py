@@ -7,6 +7,7 @@ import asyncio
 import logging
 import logging.handlers
 import os
+import re
 import sys
 import traceback
 
@@ -19,6 +20,62 @@ from . import registry
 from . import route
 from . import server
 from . import utils
+
+
+class HighlightFormatter(logging.Formatter):
+
+    grey = "\x1b[38;20m"
+    blue = "\x1b[36;20m"
+    green = "\x1b[32;20m"
+    yellow = "\x1b[33;20m"
+    red = "\x1b[31;20m"
+    bold_red = "\x1b[31;1m"
+    purple = "\x1b[35;20m"
+    reset = "\x1b[0m"
+
+    def __init__(self, format):
+        super(HighlightFormatter, self).__init__(format)
+        self._format = format.replace(
+            "%(asctime)s", self.grey + "%(asctime)s" + self.reset
+        )
+        self.FORMATS = {
+            logging.DEBUG: self.blue,
+            logging.INFO: self.green,
+            logging.WARNING: self.yellow,
+            logging.ERROR: self.red,
+            logging.CRITICAL: self.bold_red,
+        }
+
+    def format(self, record):
+        log_fmt = self._format.replace(
+            "%(levelname)s",
+            self.FORMATS.get(record.levelno) + "%(levelname)s" + self.reset,
+        )
+        record.msg = re.sub(
+            r"\[([\w\.-]+):(\d+)\]\[([\w\.-]+):(\d+)\]",
+            r"[%(green)s\1%(reset)s:%(purple)s\2%(reset)s][%(yellow)s\3%(reset)s:%(blue)s\4%(reset)s]"
+            % {
+                "green": self.green,
+                "purple": self.purple,
+                "yellow": self.yellow,
+                "blue": self.blue,
+                "reset": self.reset,
+            },
+            record.msg,
+        )
+        record.msg = re.sub(
+            r"\[([\d\.]+)\]",
+            r"[%(blue)s\1%(reset)s]" % {"blue": self.blue, "reset": self.reset},
+            record.msg,
+        )
+        record.msg = re.sub(
+            r"\s+\[([\w|-|_]+)\]\s+",
+            r" [%(purple)s\1%(reset)s] " % {"purple": self.purple, "reset": self.reset},
+            record.msg,
+        )
+
+        formatter = logging.Formatter(log_fmt)
+        return formatter.format(record)
 
 
 def handle_args(args):
@@ -62,7 +119,11 @@ def handle_args(args):
         log_file = os.path.abspath(args.log_file)
 
     handler = logging.StreamHandler()
-    formatter = logging.Formatter("[%(asctime)s][%(levelname)s]%(message)s")
+    fmt = "[%(asctime)s][%(levelname)s]%(message)s"
+    if args.no_color:
+        formatter = logging.Formatter(fmt)
+    else:
+        formatter = HighlightFormatter(fmt)
     handler.setFormatter(formatter)
 
     if args.log_level == "verbose":
@@ -126,8 +187,17 @@ def main():
     parser.add_argument(
         "-d", "--daemon", help="run as daemon", action="store_true", default=False
     )
+    parser.add_argument(
+        "--no-color", help="disable color output", action="store_true", default=False
+    )
     parser.add_argument("-p", "--plugin", help="load plugin", action="append")
-    parser.add_argument("-V", "--version", help="show current version", action="store_true", default=False)
+    parser.add_argument(
+        "-V",
+        "--version",
+        help="show current version",
+        action="store_true",
+        default=False,
+    )
 
     args = sys.argv[1:]
     if not args:
