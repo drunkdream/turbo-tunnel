@@ -120,7 +120,10 @@ def handle_args(args):
 
     handler = logging.StreamHandler()
     fmt = "[%(asctime)s][%(levelname)s]%(message)s"
-    if args.no_color:
+    enable_color_output = not args.no_color
+    if enable_color_output and sys.platform == "win32":
+        enable_color_output = utils.enable_native_ansi()
+    if not enable_color_output:
         formatter = logging.Formatter(fmt)
     else:
         formatter = HighlightFormatter(fmt)
