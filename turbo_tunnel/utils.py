@@ -514,3 +514,34 @@ def checksum(data):
         s = (s & 0xFFFF) + (s >> 16)
     s = ~s & 0xFFFF
     return s
+
+
+def enable_native_ansi():
+    """Enables native ANSI sequences in console. Windows 10 only.
+    Returns whether successful.
+    """
+    import ctypes.wintypes
+
+    ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x04
+
+    out_handle = ctypes.windll.kernel32.GetStdHandle(subprocess.STD_OUTPUT_HANDLE)
+
+    # GetConsoleMode fails if the terminal isn't native.
+    mode = ctypes.wintypes.DWORD()
+    if ctypes.windll.kernel32.GetConsoleMode(out_handle, ctypes.byref(mode)) == 0:
+        return False
+
+    if not (mode.value & ENABLE_VIRTUAL_TERMINAL_PROCESSING):
+        if (
+            ctypes.windll.kernel32.SetConsoleMode(
+                out_handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            )
+            == 0
+        ):
+            print(
+                "kernel32.SetConsoleMode to enable ANSI sequences failed",
+                file=sys.stderr,
+            )
+            return False
+
+    return True

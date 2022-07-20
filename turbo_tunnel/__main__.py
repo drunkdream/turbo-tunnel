@@ -7,6 +7,7 @@ import asyncio
 import logging
 import logging.handlers
 import os
+import re
 import sys
 import traceback
 
@@ -19,6 +20,74 @@ from . import registry
 from . import route
 from . import server
 from . import utils
+
+
+class HighlightFormatter(logging.Formatter):
+
+    reset = "\x1b[0m"
+    red = "\x1b[0;31m"
+    green = "\x1b[0;32m"
+    yellow = "\x1b[0;33m"
+    blue = "\x1b[0;34m"
+    purple = "\x1b[0;35m"
+    cyan = "\x1b[0;36m"
+    white = "\x1b[0;37m"
+    grey = "\x1b[0;38m"
+
+    light_red = "\x1b[0;91m"
+    light_green = "\x1b[0;92m"
+    light_yellow = "\x1b[0;93m"
+    light_blue = "\x1b[0;94m"
+    light_purple = "\x1b[0;95m"
+    light_cyan = "\x1b[0;96m"
+    light_white = "\x1b[0;97m"
+    light_grey = "\x1b[0;98m"
+
+    bold_red = "\x1b[31;1m"
+
+    def __init__(self, format):
+        super(HighlightFormatter, self).__init__(format)
+        self._format = format.replace(
+            "%(asctime)s", self.grey + "%(asctime)s" + self.reset
+        )
+        self.FORMATS = {
+            logging.DEBUG: self.cyan,
+            logging.INFO: self.green,
+            logging.WARNING: self.yellow,
+            logging.ERROR: self.red,
+            logging.CRITICAL: self.bold_red,
+        }
+
+    def format(self, record):
+        log_fmt = self._format.replace(
+            "%(levelname)s",
+            self.FORMATS.get(record.levelno) + "%(levelname)s" + self.reset,
+        )
+        record.msg = re.sub(
+            r"\[([\w\.-]+):(\d+)\]\[([\w\.-]+):(\d+)\]",
+            r"[%(source_address)s\1%(reset)s:%(source_port)s\2%(reset)s][%(dest_address)s\3%(reset)s:%(dest_port)s\4%(reset)s]"
+            % {
+                "source_address": self.green,
+                "source_port": self.light_purple,
+                "dest_address": self.yellow,
+                "dest_port": self.light_red,
+                "reset": self.reset,
+            },
+            record.msg,
+        )
+        record.msg = re.sub(
+            r"\[([\d\.]+)\]",
+            r"[%(seconds)s\1%(reset)s]" % {"seconds": self.cyan, "reset": self.reset},
+            record.msg,
+        )
+        record.msg = re.sub(
+            r"\s+\[([\w|-|_]+)\]\s+",
+            r" [%(tunnel)s\1%(reset)s] " % {"tunnel": self.purple, "reset": self.reset},
+            record.msg,
+        )
+
+        formatter = logging.Formatter(log_fmt)
+        return formatter.format(record)
 
 
 def handle_args(args):
@@ -62,7 +131,14 @@ def handle_args(args):
         log_file = os.path.abspath(args.log_file)
 
     handler = logging.StreamHandler()
-    formatter = logging.Formatter("[%(asctime)s][%(levelname)s]%(message)s")
+    fmt = "[%(asctime)s][%(levelname)s]%(message)s"
+    enable_color_output = not args.no_color
+    if enable_color_output and sys.platform == "win32":
+        enable_color_output = utils.enable_native_ansi()
+    if not enable_color_output:
+        formatter = logging.Formatter(fmt)
+    else:
+        formatter = HighlightFormatter(fmt)
     handler.setFormatter(formatter)
 
     if args.log_level == "verbose":
@@ -126,8 +202,17 @@ def main():
     parser.add_argument(
         "-d", "--daemon", help="run as daemon", action="store_true", default=False
     )
+    parser.add_argument(
+        "--no-color", help="disable color output", action="store_true", default=False
+    )
     parser.add_argument("-p", "--plugin", help="load plugin", action="append")
-    parser.add_argument("-V", "--version", help="show current version", action="store_true", default=False)
+    parser.add_argument(
+        "-V",
+        "--version",
+        help="show current version",
+        action="store_true",
+        default=False,
+    )
 
     args = sys.argv[1:]
     if not args:

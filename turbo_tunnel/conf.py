@@ -148,7 +148,7 @@ class TunnelConfiguration(object):
             await self.load()
 
     def parse(self):
-        with open(self._conf_file) as fp:
+        with open(self._conf_file, encoding="utf-8") as fp:
             text = fp.read()
             try:
                 return yaml.safe_load(text)
