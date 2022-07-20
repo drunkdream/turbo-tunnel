@@ -24,14 +24,26 @@ from . import utils
 
 class HighlightFormatter(logging.Formatter):
 
-    grey = "\x1b[38;20m"
-    blue = "\x1b[36;20m"
-    green = "\x1b[32;20m"
-    yellow = "\x1b[33;20m"
-    red = "\x1b[31;20m"
-    bold_red = "\x1b[31;1m"
-    purple = "\x1b[35;20m"
     reset = "\x1b[0m"
+    red = "\x1b[0;31m"
+    green = "\x1b[0;32m"
+    yellow = "\x1b[0;33m"
+    blue = "\x1b[0;34m"
+    purple = "\x1b[0;35m"
+    cyan = "\x1b[0;36m"
+    white = "\x1b[0;37m"
+    grey = "\x1b[0;38m"
+
+    light_red = "\x1b[0;91m"
+    light_green = "\x1b[0;92m"
+    light_yellow = "\x1b[0;93m"
+    light_blue = "\x1b[0;94m"
+    light_purple = "\x1b[0;95m"
+    light_cyan = "\x1b[0;96m"
+    light_white = "\x1b[0;97m"
+    light_grey = "\x1b[0;98m"
+
+    bold_red = "\x1b[31;1m"
 
     def __init__(self, format):
         super(HighlightFormatter, self).__init__(format)
@@ -39,7 +51,7 @@ class HighlightFormatter(logging.Formatter):
             "%(asctime)s", self.grey + "%(asctime)s" + self.reset
         )
         self.FORMATS = {
-            logging.DEBUG: self.blue,
+            logging.DEBUG: self.cyan,
             logging.INFO: self.green,
             logging.WARNING: self.yellow,
             logging.ERROR: self.red,
@@ -53,24 +65,24 @@ class HighlightFormatter(logging.Formatter):
         )
         record.msg = re.sub(
             r"\[([\w\.-]+):(\d+)\]\[([\w\.-]+):(\d+)\]",
-            r"[%(green)s\1%(reset)s:%(purple)s\2%(reset)s][%(yellow)s\3%(reset)s:%(blue)s\4%(reset)s]"
+            r"[%(source_address)s\1%(reset)s:%(source_port)s\2%(reset)s][%(dest_address)s\3%(reset)s:%(dest_port)s\4%(reset)s]"
             % {
-                "green": self.green,
-                "purple": self.purple,
-                "yellow": self.yellow,
-                "blue": self.blue,
+                "source_address": self.green,
+                "source_port": self.light_purple,
+                "dest_address": self.yellow,
+                "dest_port": self.light_red,
                 "reset": self.reset,
             },
             record.msg,
         )
         record.msg = re.sub(
             r"\[([\d\.]+)\]",
-            r"[%(blue)s\1%(reset)s]" % {"blue": self.blue, "reset": self.reset},
+            r"[%(seconds)s\1%(reset)s]" % {"seconds": self.cyan, "reset": self.reset},
             record.msg,
         )
         record.msg = re.sub(
             r"\s+\[([\w|-|_]+)\]\s+",
-            r" [%(purple)s\1%(reset)s] " % {"purple": self.purple, "reset": self.reset},
+            r" [%(tunnel)s\1%(reset)s] " % {"tunnel": self.purple, "reset": self.reset},
             record.msg,
         )
 
