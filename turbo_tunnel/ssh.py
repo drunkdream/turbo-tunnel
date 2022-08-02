@@ -64,7 +64,17 @@ class MicroSSHServer(asyncssh.SSHServer):
         return True
 
     async def connection_requested(self, dest_host, dest_port, orig_host, orig_port):
+        utils.logger.info(
+            "[%s][%s:%d] Create tcp forward to %s:%d"
+            % (self.__class__.__name__, orig_host, orig_port, dest_host, dest_port)
+        )
         return await self._conn.forward_connection(dest_host, dest_port)
+
+    def server_requested(self, listen_host, listen_port):
+        utils.logger.info(
+            "[%s] Listen on %s:%d" % (self.__class__.__name__, listen_host, listen_port)
+        )
+        return True
 
     def resize(self, fd, size):
         utils.logger.info(
