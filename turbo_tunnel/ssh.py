@@ -390,6 +390,7 @@ class SSHTunnel(tunnel.Tunnel):
             }
             private_key_path = self._url.params.get("private_key")
             if private_key_path:
+                private_key_path = os.path.expanduser(private_key_path)
                 if not os.path.isfile(private_key_path):
                     utils.logger.error(
                         "[%s] Private key file %s not found"
@@ -412,6 +413,8 @@ class SSHTunnel(tunnel.Tunnel):
                         options["password"] = password
                 else:
                     options["password"] = ""
+            else:
+                options["username"] = "root"
             try:
                 options = asyncssh.SSHClientConnectionOptions(**options)
             except (asyncssh.KeyImportError, asyncssh.KeyEncryptionError) as e:
