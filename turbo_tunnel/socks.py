@@ -356,6 +356,13 @@ class Socks5ConnectRequestPacket(object):
                 socket.inet_ntoa(buffer[4:8]),
                 struct.unpack("!H", buffer[8:10])[0],
             )
+        elif address_type == EnumSocks5AddressType.IPV6:
+            if len(buffer) != 22:
+                raise utils.TunnelPacketError("Invalid ipv6 connect request packet")
+            address = (
+                socket.inet_ntop(socket.AF_INET6, buffer[4:20]),
+                struct.unpack("!H", buffer[20:22])[0],
+            )
         elif address_type == EnumSocks5AddressType.DOMAIN:
             domain_len = buffer[4]
             address = (
@@ -680,11 +687,14 @@ class Socks5TunnelServer(server.TCPTunnelServer):
         resolved_target_address = await utils.resolve_address(target_address)
         if resolved_target_address[0] == target_address[0]:
             resolved_target_address = ("255.255.255.255", resolved_target_address[1])
+
         if connect_request.command == EnumSocks5Command.UDP_ASSOCIATE:
             listen_address = None
             udp_proxy = None
             if not self._enable_udp:
-                utils.logger.info("[%s] UDP proxy is disabled" % self.__class__.__name__)
+                utils.logger.info(
+                    "[%s] UDP proxy is disabled" % self.__class__.__name__
+                )
                 connect_response = Socks5ConnectResponsePacket(2, ("127.0.0.1", 0))
                 await downstream.write(connect_response.serialize())
                 downstream.close()

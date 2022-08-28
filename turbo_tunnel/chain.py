@@ -131,7 +131,11 @@ class TunnelChain(object):
             if tunnel_urls[0].protocol == "icmp":
                 tunn = None
             else:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+                af = socket.AF_INET
+                if utils.is_ipv6_address(tunnel_address[0]):
+                    af = socket.AF_INET6
+                s = socket.socket(af, socket.SOCK_STREAM, 0)
+
                 stream = tornado.iostream.IOStream(s)
 
                 tunn = tunnel.TCPTunnel(stream, None, tunnel_address)
