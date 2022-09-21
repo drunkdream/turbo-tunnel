@@ -171,9 +171,10 @@ class WebSocketTunnel(tunnel.Tunnel):
         headers = {}
         auth_data = self._url.auth
         if auth_data:
-            headers["Proxy-Authorization"] = "Basic %s" % auth.http_basic_auth(
+            basic_auth = "Basic %s" % auth.http_basic_auth(
                 *auth_data.split(":")
             )
+            headers["X-Proxy-Authorization"] = headers["Proxy-Authorization"] = basic_auth
         ca_cert = self._url.params.pop("ca_cert", None)
         client_key = self._url.params.pop("client_key", None)
         client_cert = self._url.params.pop("client_cert", None)
@@ -265,7 +266,7 @@ class WebSocketTunnelServer(server.TunnelServer):
                 if auth_data:
                     auth_data = auth_data.split(":")
                     for header in self.request.headers:
-                        if header == "Proxy-Authorization":
+                        if header in ("Proxy-Authorization", "X-Proxy-Authorization"):
                             value = self.request.headers[header]
                             auth_type, auth_value = value.split()
                             if (
