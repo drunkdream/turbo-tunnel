@@ -205,6 +205,9 @@ def main():
     parser.add_argument(
         "--no-color", help="disable color output", action="store_true", default=False
     )
+    parser.add_argument(
+        "--stop-on-error", help="stop on error occured", action="store_true", default=False
+    )
     parser.add_argument("-p", "--plugin", help="load plugin", action="append")
     parser.add_argument(
         "-V",
@@ -247,7 +250,8 @@ def main():
                 )
             )
         print(message, file=sys.stderr)
-        loop.stop()
+        if args.stop_on_error:
+            loop.stop()
 
     loop = asyncio.get_event_loop()
     loop.set_exception_handler(handle_exception)

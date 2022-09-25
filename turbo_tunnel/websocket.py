@@ -43,7 +43,7 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             self._url,
             headers=headers,
             connect_timeout=timeout,
-            request_timeout=timeout,
+            request_timeout=None,
             ca_certs=ca_cert,
             client_key=client_key,
             client_cert=client_cert,
@@ -133,12 +133,17 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
             if self._connected == None:
                 await asyncio.sleep(0.005)
                 continue
+            if not self._connected:
+                self.connect_future.cancel()
+                self.close()
             self._patcher.unpatch()
             return self._connected
         else:
             utils.logger.warn(
                 "[%s] Connect %s timeout" % (self.__class__.__name__, self._url)
             )
+            self.final_callback = None
+            self.close()
             self._patcher.unpatch()
             return False
 
