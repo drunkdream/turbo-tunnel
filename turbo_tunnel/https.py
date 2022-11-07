@@ -285,9 +285,13 @@ class HTTPSTunnelServer(server.TunnelServer):
                 return await self.handle_request()
 
             async def connect(self):
-                address = self.request.path.split(":")
-                address[1] = int(address[1])
-                address = tuple(address)
+                path = self.request.path
+                if path.startswith("::1"):
+                    address = ("::1", int(path[4:]))
+                else:
+                    address = path.split(":")
+                    address[1] = int(address[1])
+                    address = tuple(address)
                 downstream = tunnel.TCPTunnel(
                     self.request.connection.detach(), server_side=True
                 )
