@@ -134,6 +134,10 @@ class TunnelChain(object):
                 af = socket.AF_INET
                 if utils.is_ipv6_address(tunnel_address[0]):
                     af = socket.AF_INET6
+                    utils.logger.debug(
+                        "[%s] Address %s is ipv6 address"
+                        % (self.__class__.__name__, tunnel_address[0])
+                    )
                 s = socket.socket(af, socket.SOCK_STREAM, 0)
 
                 stream = tornado.iostream.IOStream(s)
