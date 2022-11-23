@@ -15,7 +15,7 @@ class TunnelRouter(object):
     async def resolve(self, address):
         if address[0] in self._conf.hosts:
             return self._conf.hosts[address[0]], address[1]
-        return address
+        return await utils.resolve_address(address)
 
     async def select_tunnel(self, address_list):
         for rule in self._conf.rules:
@@ -40,11 +40,5 @@ class TunnelRouter(object):
         rule, tunnel = await self.select_tunnel(address_list)
         if rule:
             return rule, tunnel
-        if not is_ip_address:
-            resolved_address = await utils.resolve_address(address)
-            if resolved_address != address:
-                rule, tunnel = await self.select_tunnel(address_list)
-                if rule:
-                    return rule, tunnel
         # select default tunnel
         return "default", self._conf.default_tunnel
