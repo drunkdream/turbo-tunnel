@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-'''terminal plugin
-'''
+"""terminal plugin
+"""
 
 import asyncio
 import logging
@@ -14,7 +14,7 @@ from ..utils import logger
 
 
 class TerminalColumn(object):
-    def __init__(self, title, width, align='left', color=None):
+    def __init__(self, title, width, align="left", color=None):
         self.title = title
         self.width = width
         self.align = align
@@ -35,21 +35,21 @@ class TerminalTable(object):
             offset += header.width
             header.end = offset
         self._stdout = stdout or sys.stdout
-        self._stdout.write('\x1b[?1047h')
+        self._stdout.write("\x1b[?1047h")
 
     def __del__(self):
-        self._stdout.write('\x1b[?1047l')
-        self._stdout.write('\x1b[100B')
+        self._stdout.write("\x1b[?1047l")
+        self._stdout.write("\x1b[100B")
 
     def render_text(self, text, line, column, color=None):
         if color:
             self._stdout.write(color)
-        self._stdout.write('\x1b[%d;%dH' % (line, column))
+        self._stdout.write("\x1b[%d;%dH" % (line, column))
         self._stdout.write(text)
         self._stdout.flush()
 
     def render_row(self, data, line, color=None):
-        self._stdout.write('\x1b[0m')
+        self._stdout.write("\x1b[0m")
         if color:
             self._stdout.write(color)
 
@@ -58,25 +58,29 @@ class TerminalTable(object):
             offset = header.start
             it = str(it)
             text = it
-            if header.align != 'right':
+            if header.align != "right":
                 if len(it) > header.width:
-                    text = it[:header.width]
+                    text = it[: header.width]
             else:
                 if len(it) > header.width:
-                    text = it[len(it) - header.width:]
+                    text = it[len(it) - header.width :]
                 else:
                     offset += header.width - len(it)
             self.render_text(text, line, offset)
-        self._stdout.write('\x1b[0m')
+        self._stdout.write("\x1b[0m")
 
     def render_headers(self, line):
         for header in self._headers:
             self.render_text(
-                header.title, line, header.start if header.align == 'left' else
-                (header.end - len(header.title)))
+                header.title,
+                line,
+                header.start
+                if header.align == "left"
+                else (header.end - len(header.title)),
+            )
 
     def render(self, data_table):
-        self._stdout.write('\x1b[2J')
+        self._stdout.write("\x1b[2J")
         self.render_text(self._title, 1, 1)
         line = len(self._title.splitlines()) + 2
         self.render_headers(line)
@@ -84,7 +88,7 @@ class TerminalTable(object):
             color = None
             if len(data) > len(self._headers):
                 color = data[len(self._headers)]
-            data = data[:len(self._headers)]
+            data = data[: len(self._headers)]
             self.render_row(data, index + line + 1, color)
 
 
@@ -112,8 +116,7 @@ class Connection(object):
 
     @property
     def start_time(self):
-        return time.strftime("%Y-%m-%d %H:%M:%S",
-                             time.localtime(self._start_time))
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self._start_time))
 
     @property
     def duration(self):
@@ -122,7 +125,7 @@ class Connection(object):
         minute = delta // 60
         hour = minute // 60
         minute = minute % 60
-        return '%.2d:%.2d:%.2d' % (hour, minute, second)
+        return "%.2d:%.2d:%.2d" % (hour, minute, second)
 
     @property
     def end_time(self):
@@ -157,7 +160,7 @@ class RedirectedOutStream(object):
                 file_path = handler.baseFilename
                 break
         if file_path:
-            with open(file_path, 'a') as fp:
+            with open(file_path, "a") as fp:
                 fp.write(s)
 
     def flush(self):
@@ -165,11 +168,11 @@ class RedirectedOutStream(object):
 
 
 class TerminalPlugin(Plugin):
-    '''Show connections in terminal
-    '''
+    """Show connections in terminal"""
+
     flush_internal = 1
-    conn_opened_color = '\x1b[32m'
-    conn_closed_color = '\x1b[1;31m'
+    conn_opened_color = "\x1b[32m"
+    conn_closed_color = "\x1b[1;31m"
 
     def _patch_output(self):
         origin_stdout = sys.stdout
@@ -182,35 +185,23 @@ class TerminalPlugin(Plugin):
 
     def on_load(self):
         origin_stdout, _ = self._patch_output()
-        self._term_tab = TerminalTable(BANNER, [{
-            'title': 'Source Address',
-            'width': 18,
-            'align': 'left',
-        }, {
-            'title': 'Tunnel Address',
-            'width': 22,
-            'align': 'left'
-        }, {
-            'title': 'Target Address',
-            'width': 22,
-            'align': 'left'
-        }, {
-            'title': 'Start Time',
-            'width': 20,
-            'align': 'left'
-        }, {
-            'title': 'Duration',
-            'width': 10,
-            'align': 'right'
-        }, {
-            'title': 'Bytes Out',
-            'width': 11,
-            'align': 'right'
-        }, {
-            'title': 'Bytes In',
-            'width': 11,
-            'align': 'right'
-        }], origin_stdout)
+        self._term_tab = TerminalTable(
+            BANNER,
+            [
+                {
+                    "title": "Source Address",
+                    "width": 18,
+                    "align": "left",
+                },
+                {"title": "Tunnel Address", "width": 22, "align": "left"},
+                {"title": "Target Address", "width": 22, "align": "left"},
+                {"title": "Start Time", "width": 20, "align": "left"},
+                {"title": "Duration", "width": 10, "align": "right"},
+                {"title": "Bytes Out", "width": 11, "align": "right"},
+                {"title": "Bytes In", "width": 11, "align": "right"},
+            ],
+            origin_stdout,
+        )
         self._conn_list = []
         self._running = True
         asyncio.ensure_future(self.run())
@@ -224,37 +215,51 @@ class TerminalPlugin(Plugin):
         for conn in self._conn_list:
             if conn.client_address == src_addr and conn.target_address == dst_addr:
                 return conn
-        logger.warn('[%s] Connection %s:%d => %s:%d not found' %
-                    (self.__class__.__name__, src_addr[0], src_addr[1],
-                     dst_addr[0], dst_addr[1]))
+        logger.warn(
+            "[%s] Connection %s:%d => %s:%d not found"
+            % (
+                self.__class__.__name__,
+                src_addr[0],
+                src_addr[1],
+                dst_addr[0],
+                dst_addr[1],
+            )
+        )
         return None
 
     def on_new_connection(self, connection):
-        conn = Connection(connection.client_address, connection.target_address,
-                          connection.tunnel_address)
+        conn = Connection(
+            connection.client_address,
+            connection.target_address,
+            connection.tunnel_address,
+        )
         self._conn_list.append(conn)
 
     def on_tunnel_address_updated(self, connection, tunnel_address):
-        conn = self._lookup_connection(connection.client_address,
-                                       connection.target_address)
+        conn = self._lookup_connection(
+            connection.client_address, connection.target_address
+        )
         if conn:
             conn.on_tunnel_address_updated(tunnel_address)
 
     def on_data_recevied(self, connection, buffer):
-        conn = self._lookup_connection(connection.client_address,
-                                       connection.target_address)
+        conn = self._lookup_connection(
+            connection.client_address, connection.target_address
+        )
         if conn:
             conn.on_recv_bytes(len(buffer))
 
     def on_data_sent(self, connection, buffer):
-        conn = self._lookup_connection(connection.client_address,
-                                       connection.target_address)
+        conn = self._lookup_connection(
+            connection.client_address, connection.target_address
+        )
         if conn:
             conn.on_send_bytes(len(buffer))
 
     def on_connection_closed(self, connection):
-        conn = self._lookup_connection(connection.client_address,
-                                       connection.target_address)
+        conn = self._lookup_connection(
+            connection.client_address, connection.target_address
+        )
         if conn:
             conn.on_close()
 
@@ -273,11 +278,13 @@ class TerminalPlugin(Plugin):
 
             for conn in self._conn_list:
                 data = [
-                    '%s:%d' % conn.client_address,
-                    ('%s:%d' %
-                     conn.tunnel_address) if conn.tunnel_address else '--',
-                    '%s:%d' % conn.target_address, conn.start_time,
-                    conn.duration, conn.bytes_sent, conn.bytes_recv
+                    "%s:%d" % conn.client_address,
+                    ("%s:%d" % conn.tunnel_address) if conn.tunnel_address else "--",
+                    "%s:%d" % conn.target_address,
+                    conn.start_time,
+                    conn.duration,
+                    conn.bytes_sent,
+                    conn.bytes_recv,
                 ]
                 if not conn in prev_conns:
                     data.append(self.conn_opened_color)
