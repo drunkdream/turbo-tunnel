@@ -3,6 +3,7 @@
 """
 
 import copy
+import inspect
 import socket
 import time
 
@@ -102,6 +103,17 @@ class TunnelChain(object):
             )
         return copy.deepcopy(tunnel_urls)
 
+    async def get_tunnel_address(self, tunnel_url):
+        tunnel_class = registry.tunnel_registry[tunnel_url.protocol]
+        if not tunnel_class:
+            return tunnel_url.address
+        if hasattr(tunnel_class, "get_tunnel_address"):
+            result = tunnel_class.get_tunnel_address(tunnel_url)
+            if inspect.isawaitable(result):
+                result = await result
+            return result
+        return tunnel_url.address
+
     async def create_tunnel(self, address, tunnel_urls=None):
         tunnel_urls = tunnel_urls or await self.select_tunnel(address)
         if len(tunnel_urls) > 1:
@@ -121,8 +133,10 @@ class TunnelChain(object):
                     tunnel_urls.pop(i)  # Ignore internal tcp:// tunnel
 
         tunnel_address = address
-        if tunnel_urls and tunnel_urls[0].host and tunnel_urls[0].port:
-            tunnel_address = (tunnel_urls[0].host, tunnel_urls[0].port)
+        if tunnel_urls:
+            host, port = await self.get_tunnel_address(tunnel_urls[0])
+            if host and port:
+                tunnel_address = host, port
 
         cached_tunnel_index = self.get_cached_tunnel(tunnel_urls)
         if cached_tunnel_index < 0:
@@ -141,7 +155,6 @@ class TunnelChain(object):
                 s = socket.socket(af, socket.SOCK_STREAM, 0)
 
                 stream = tornado.iostream.IOStream(s)
-
                 tunn = tunnel.TCPTunnel(stream, None, tunnel_address)
                 if not await tunn.connect():
                     raise utils.TunnelConnectError(
@@ -174,7 +187,7 @@ class TunnelChain(object):
             next_address = address
             if i < len(tunnel_urls) - 1:
                 next_url = tunnel_urls[i + 1]
-                next_address = next_url.host, next_url.port
+                next_address = await self.get_tunnel_address(next_url)
             if self._tunnel_router:
                 next_address = await self._tunnel_router.resolve(next_address)
             tunn = tunnel_class(tunn, url, next_address)
