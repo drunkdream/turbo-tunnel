@@ -506,7 +506,13 @@ class SSLTunnel(Tunnel, asyncio.Protocol):
 
     def data_received(self, buffer):
         try:
-            self._ssl_protocol.data_received(buffer)
+            if hasattr(self._ssl_protocol, "data_received"):
+                # <= 3.10
+                self._ssl_protocol.data_received(buffer)
+            else:
+                asyncio.protocols._feed_data_to_buffered_proto(
+                    self._ssl_protocol, buffer
+                )
         except ssl.CertificateError:
             utils.logger.exception(
                 "[%s] SSL verify certificate failed" % self.__class__.__name__
