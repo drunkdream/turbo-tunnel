@@ -38,7 +38,11 @@ class PluginRegistry(object):
     def register(self, plugin_cls):
         plugin = plugin_cls()
         self._plugin_list.append(plugin)
-        plugin.on_load()
+        try:
+            plugin.on_load()
+        except Exception as ex:
+            plugin.on_unload()
+            raise ex
 
     def get_plugins(self):
         return self._plugin_list
