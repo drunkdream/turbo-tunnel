@@ -116,6 +116,7 @@ class TunnelChain(object):
 
     async def create_tunnel(self, address, tunnel_urls=None):
         tunnel_urls = tunnel_urls or await self.select_tunnel(address)
+        self._tunnel_urls = tunnel_urls
         if len(tunnel_urls) > 1:
             for i in range(len(tunnel_urls) - 2, -1, -1):
                 tunnel_url = tunnel_urls[i]
