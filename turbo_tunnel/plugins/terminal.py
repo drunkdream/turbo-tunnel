@@ -5,6 +5,7 @@
 import asyncio
 import atexit
 import curses
+import math
 import sys
 import time
 
@@ -78,6 +79,7 @@ class TerminalView(object):
         self._height = height
         self._last_pos = [0, 0]
         self._last_color = None
+        self._buffer = []
 
     @property
     def width(self):
@@ -86,6 +88,33 @@ class TerminalView(object):
     @property
     def height(self):
         return self._height
+
+    def move(self, pos):
+        self.clear()
+        self.refresh()
+        try:
+            self._view.mvwin(pos[1], pos[0])
+            self._view.mvderwin(pos[1], pos[0])
+        except:
+            logger.exception(
+                "[%s] Move terminal view to %d,%d failed"
+                % (self.__class__.__name__, pos[0], pos[1])
+            )
+            return
+
+        for i in range(self._height):
+            row = len(self._buffer) - self._height + i
+            for j in range(min(len(self._buffer[row]), self._width)):
+                c, color = self._buffer[row][j]
+                try:
+                    if color is not None:
+                        self._view.addstr(i, j, c, color)
+                    else:
+                        self._view.addstr(i, j, c)
+                except:
+                    continue
+                    #raise Exception("Write to (%d,%d) failed" % (j, i))
+        self.refresh()
 
     def resize(self, width=None, height=None):
         width = width or self._width
@@ -97,8 +126,13 @@ class TerminalView(object):
                 "[%s] Resize terminal view to %d:%d failed"
                 % (self.__class__.__name__, width, height)
             )
+            return
+        if self._last_pos[1] >= height:
+            self.scroll(self._last_pos[1] - height)
+            self._last_pos[1] = height - 1
         self._width = width
         self._height = height
+        self._view.refresh()
 
     def get_color(self, color):
         if color in curses_colors:
@@ -139,8 +173,12 @@ class TerminalView(object):
         return items
 
     def clear(self):
-        for i in range(self._height):
-            self._view.addstr(i, 0, " " * self._width)
+        self._view.erase()
+
+    def scroll(self, rows):
+        self._view.scroll(rows)
+        for i in range(self._height - rows - 1):
+            self._buffer[i] = self._buffer[i+rows][:]
 
     def write_string(self, content, pos, color=None, auto_wrap=True):
         if not content:
@@ -156,6 +194,18 @@ class TerminalView(object):
                 content = content[:available_length]
         if pos[1] >= self._height:
             return
+
+        max_y = pos[1] + math.ceil(len(content) / self._width) - 1
+        if len(self._buffer) <= max_y:
+            for _ in range(len(self._buffer), max_y + 1):
+                self._buffer.append([(" ", None) for _ in range(self._width)])
+        for i, c in enumerate(content):
+            x, y = pos[0] + i, pos[1]
+            if x >= self._width:
+                y += x // self._width
+                x = x % self._width
+            self._buffer[y][x] = (c, color)
+
         if color is not None:
             self._view.addstr(pos[1], pos[0], content, color)
         else:
@@ -174,32 +224,35 @@ class TerminalView(object):
         lines = buffer.split("\n")
         for i, line in enumerate(lines):
             if line:
+                if pos[1] >= self._height:
+                    self.scroll(1)
+                    pos[1] -= 1
                 items = self.parse_string_format(line)
-                line_height = prev_line_height = 0
+                line_height = prev_line_height = 1
                 line_bytes = pos[0]
                 for color, content in items:
                     color = color or self._last_color
-                    line_bytes += len(content)
-                    line_height = line_bytes // self._width
-                    curr_pos = tuple(pos)
-                    if line_height > prev_line_height:
-                        line_height_delta = line_height - prev_line_height
-                        if pos[1] >= self._height - line_height_delta:
-                            self._view.scroll(line_height_delta)
-                        else:
-                            pos[1] += line_height_delta
+                    if content:
+                        line_bytes += len(content)
+                        line_height = math.ceil(line_bytes / self._width)
+                        curr_pos = list(pos)
+                        if line_height > prev_line_height:
+                            line_height_delta = line_height - prev_line_height
+                            if pos[1] >= self._height - line_height_delta:
+                                self.scroll(line_height_delta - 1)
+                                curr_pos[1] -= line_height_delta - 1
+                            else:
+                                pos[1] += line_height_delta
                         pos[0] = line_bytes % self._width
-                    else:
-                        pos[0] += len(content)
+                        if pos[0] == 0:
+                            pos[1] += 1
 
                     prev_line_height = line_height
                     self.write_string(content, curr_pos, color, auto_wrap=auto_wrap)
                     self._last_color = color
 
             if i < len(lines) - 1:
-                if pos[1] >= self._height - 1:
-                    self._view.scroll(1)
-                else:
+                if pos[1] < self._height:
                     pos[1] += 1
                 pos[0] = 0
         self._last_pos = pos
@@ -241,7 +294,7 @@ class TerminalTable(object):
         if line >= self._view.height:
             return
         if color:
-            text = color + text
+            text = color + text + "\x1b[0m"
         self._view.write_buffer(text, (column, line), auto_wrap=False)
 
     def render_row(self, data, line, color=None):
@@ -256,7 +309,7 @@ class TerminalTable(object):
             else:
                 if len(it) > header.width:
                     text = it[len(it) - header.width :]
-                else:
+                elif len(it) < (header.end - header.start):
                     offset += header.width - len(it)
             self.render_text(text, line, offset, color)
 
@@ -354,14 +407,6 @@ class Connection(object):
         self._bytes_sent += bytes
 
 
-class NoOutStream(object):
-    def write(self, s):
-        pass
-
-    def flush(self):
-        pass
-
-
 class TerminalLogger(object):
     """Terminal Logger"""
 
@@ -392,10 +437,15 @@ class TerminalPlugin(Plugin):
     conn_closed_color = "\x1b[1;31m"
 
     def on_screen_size_changed(self, width, height):
-        table_height, log_height = self._get_view_height()
-        logger.info("resize: %d:%d %d:%d" % (width, table_height, width, log_height))
-        self._table_view.resize(width, table_height)
-        self._log_view.resize(width, log_height)
+        table_height, log_height = self._get_view_height(height)
+        if height > self._screen.height:
+            self._log_view.move((0, table_height))
+            self._table_view.resize(width, table_height)
+            self._log_view.resize(width, log_height)
+        else:
+            self._table_view.resize(width, table_height)
+            self._log_view.move((0, table_height))
+            self._log_view.resize(width, log_height - 1)
 
     def _patch_output(self, view):
         origin_stdout = sys.stdout
@@ -405,17 +455,17 @@ class TerminalPlugin(Plugin):
             handler.stream = sys.stdout
         return origin_stdout, origin_stderr
 
-    def _get_view_height(self):
+    def _get_view_height(self, screen_height):
         min_table_view_height = 15
         max_log_view_height = 15
-        table_height = self._screen.height - max_log_view_height
+        table_height = screen_height - max_log_view_height
         if table_height < min_table_view_height:
             table_height = min_table_view_height
-        return table_height, self._screen.height - table_height
+        return table_height, screen_height - table_height
 
     def on_load(self):
         self._screen = TerminalScreen(self)
-        table_height, log_height = self._get_view_height()
+        table_height, log_height = self._get_view_height(self._screen.height)
         self._table_view = self._screen.create_view(self._screen.width, table_height)
         self._log_view = self._screen.create_view(
             self._screen.width, log_height, (0, table_height)
