@@ -8,6 +8,7 @@ import curses
 import math
 import sys
 import time
+import traceback
 
 from . import Plugin
 from .. import BANNER, VERSION
@@ -113,7 +114,7 @@ class TerminalView(object):
                         self._view.addstr(i, j, c)
                 except:
                     continue
-                    #raise Exception("Write to (%d,%d) failed" % (j, i))
+                    # raise Exception("Write to (%d,%d) failed" % (j, i))
         self.refresh()
 
     def resize(self, width=None, height=None):
@@ -178,7 +179,7 @@ class TerminalView(object):
     def scroll(self, rows):
         self._view.scroll(rows)
         for i in range(self._height - rows - 1):
-            self._buffer[i] = self._buffer[i+rows][:]
+            self._buffer[i] = self._buffer[i + rows][:]
 
     def write_string(self, content, pos, color=None, auto_wrap=True):
         if not content:
@@ -410,8 +411,9 @@ class Connection(object):
 class TerminalLogger(object):
     """Terminal Logger"""
 
-    def __init__(self, view):
+    def __init__(self, view, file=None):
         self._view = view
+        self._file = file
         self._running = True
 
     def write(self, buffer):
@@ -421,9 +423,11 @@ class TerminalLogger(object):
             self._view.write_buffer(buffer, refresh=True)
         except:
             self._running = False
-            logger.exception(
-                "[%s] Write terminal logger failed" % self.__class__.__name__
-            )
+            if self._file:
+                self._file.write(
+                    "[%s] Write terminal logger failed\n%s"
+                    % (self.__class__.__name__, traceback.format_exc())
+                )
 
     def flush(self):
         pass
@@ -450,7 +454,7 @@ class TerminalPlugin(Plugin):
     def _patch_output(self, view):
         origin_stdout = sys.stdout
         origin_stderr = sys.stderr
-        sys.stdout = sys.stderr = TerminalLogger(view)
+        sys.stdout = sys.stderr = TerminalLogger(view, origin_stderr)
         for handler in logger.handlers:
             handler.stream = sys.stdout
         return origin_stdout, origin_stderr
@@ -474,11 +478,7 @@ class TerminalPlugin(Plugin):
         self._term_tab = TerminalTable(
             "\x1b[36m%s \x1b[32mv%s\x1b[0m" % (BANNER.lstrip("\n").rstrip(), VERSION),
             [
-                {
-                    "title": "Source Address",
-                    "width": 18,
-                    "align": "left",
-                },
+                {"title": "Source Address", "width": 18, "align": "left",},
                 {"title": "Tunnel Address", "width": 22, "align": "left"},
                 {"title": "Target Address", "width": 22, "align": "left"},
                 {"title": "Start Time", "width": 20, "align": "left"},
