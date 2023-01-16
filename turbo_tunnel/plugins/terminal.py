@@ -105,6 +105,8 @@ class TerminalView(object):
 
         for i in range(self._height):
             row = len(self._buffer) - self._height + i
+            if row < 0 or len(self._buffer) <= row:
+                continue
             for j in range(min(len(self._buffer[row]), self._width)):
                 c, color = self._buffer[row][j]
                 try:
@@ -181,6 +183,15 @@ class TerminalView(object):
         for i in range(self._height - rows - 1):
             self._buffer[i] = self._buffer[i + rows][:]
 
+    def _set_buffer(self, x, y, data):
+        if len(self._buffer) <= y:
+            for _ in range(len(self._buffer), y + 1):
+                self._buffer.append([(" ", None) for _ in range(self._width)])
+        if len(self._buffer[y]) <= x:
+            for _ in range(len(self._buffer[y]), x + 1):
+                self._buffer[y].append((" ", None))
+        self._buffer[y][x] = data
+
     def write_string(self, content, pos, color=None, auto_wrap=True):
         if not content:
             return
@@ -196,16 +207,12 @@ class TerminalView(object):
         if pos[1] >= self._height:
             return
 
-        max_y = pos[1] + math.ceil(len(content) / self._width) - 1
-        if len(self._buffer) <= max_y:
-            for _ in range(len(self._buffer), max_y + 1):
-                self._buffer.append([(" ", None) for _ in range(self._width)])
         for i, c in enumerate(content):
             x, y = pos[0] + i, pos[1]
             if x >= self._width:
                 y += x // self._width
                 x = x % self._width
-            self._buffer[y][x] = (c, color)
+            self._set_buffer(x, y, (c, color))
 
         if color is not None:
             self._view.addstr(pos[1], pos[0], content, color)
