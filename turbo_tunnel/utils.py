@@ -510,10 +510,10 @@ async def create_process(cmdline, stdout=None, stderr=None):
         redirect_stdout, redirect_stderr = not stdout, not stderr
         if redirect_stdout:
             _stdout = subprocess.PIPE
-            stdout = getattr(sys.stdout, "buffer", sys.stdout)
+            stdout = sys.stdout
         if redirect_stderr:
             _stderr = subprocess.PIPE
-            stderr = getattr(sys.stderr, "buffer", sys.stderr)
+            stderr = sys.stderr
         proc = await asyncio.create_subprocess_shell(cmdline, stdout=_stdout, stderr=_stderr)
         if redirect_stdout:
             safe_ensure_future(redirect_process_pipe(proc, proc.stdout, stdout))
