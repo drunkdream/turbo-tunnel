@@ -494,6 +494,36 @@ def win32_daemon():
     subprocess.Popen(cmdline, creationflags=DETACHED_PROCESS, close_fds=True)
 
 
+async def redirect_process_pipe(proc, pipe, fp):
+    while True:
+        buffer = await pipe.readline()
+        if not buffer:
+            break
+        fp.write(buffer.decode())
+        if proc.returncode is not None:
+            break
+
+
+async def create_process(cmdline, stdout=None, stderr=None):
+    if sys.platform != "win32":
+        _stdout, _stderr = stdout, stderr
+        redirect_stdout, redirect_stderr = not stdout, not stderr
+        if redirect_stdout:
+            _stdout = subprocess.PIPE
+            stdout = getattr(sys.stdout, "buffer", sys.stdout)
+        if redirect_stderr:
+            _stderr = subprocess.PIPE
+            stderr = getattr(sys.stderr, "buffer", sys.stderr)
+        proc = await asyncio.create_subprocess_shell(cmdline, stdout=_stdout, stderr=_stderr)
+        if redirect_stdout:
+            safe_ensure_future(redirect_process_pipe(proc, proc.stdout, stdout))
+        if redirect_stderr:
+            safe_ensure_future(redirect_process_pipe(proc, proc.stderr, stderr))
+        return proc
+    else:
+        return subprocess.Popen(cmdline)
+
+
 async def fetch(url):
     http_client = tornado.httpclient.AsyncHTTPClient()
     try:
