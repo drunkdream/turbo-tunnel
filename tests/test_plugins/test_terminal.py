@@ -7,7 +7,7 @@ from turbo_tunnel.plugins import terminal
 
 
 def test_terminal_view():
-    if sys.platform == "win32" or not os.environ.get("TERM"):
+    if sys.platform == "win32" or os.environ.get("TERM", "unknown") in ("unknown", "dumb"):
         return
     screen = terminal.TerminalScreen()
     view = screen.create_view(screen.width, 15, (0, screen.height - 15))
