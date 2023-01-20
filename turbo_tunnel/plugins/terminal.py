@@ -486,8 +486,8 @@ class TerminalPlugin(Plugin):
             "\x1b[36m%s \x1b[32mv%s\x1b[0m" % (BANNER.lstrip("\n").rstrip(), VERSION),
             [
                 {"title": "Source Address", "width": 18, "align": "left",},
-                {"title": "Tunnel Address", "width": 22, "align": "left"},
-                {"title": "Target Address", "width": 22, "align": "left"},
+                {"title": "Tunnel Address", "width": 24, "align": "left"},
+                {"title": "Target Address", "width": 32, "align": "left"},
                 {"title": "Start Time", "width": 20, "align": "left"},
                 {"title": "Duration", "width": 10, "align": "right"},
                 {"title": "Bytes Out", "width": 11, "align": "right"},
