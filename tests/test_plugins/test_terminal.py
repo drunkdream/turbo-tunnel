@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 
+import os
 import sys
 
 from turbo_tunnel.plugins import terminal
 
 
 def test_terminal_view():
-    if sys.platform == "win32":
+    if sys.platform == "win32" or not os.environ.get("TERM"):
         return
     screen = terminal.TerminalScreen()
     view = screen.create_view(screen.width, 15, (0, screen.height - 15))
