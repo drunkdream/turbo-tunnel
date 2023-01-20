@@ -93,6 +93,7 @@ class HighlightFormatter(logging.Formatter):
 def handle_args(args):
 
     if args.plugin:
+        registry.plugin_registry.enable()
         for plugin in args.plugin:
             for module in ("turbo_tunnel.plugins.%s" % plugin, plugin):
                 try:
@@ -178,7 +179,7 @@ def handle_args(args):
 
 
 def main():
-    print(BANNER)
+    print("\x1b[0;36m%s \x1b[0;32m v%s\x1b[0m\n" % (BANNER.rstrip(), VERSION))
     parser = argparse.ArgumentParser(
         prog="turbo-tunnel", description="TurboTunnel cmdline tool v%s" % VERSION
     )
@@ -206,7 +207,10 @@ def main():
         "--no-color", help="disable color output", action="store_true", default=False
     )
     parser.add_argument(
-        "--stop-on-error", help="stop on error occured", action="store_true", default=False
+        "--stop-on-error",
+        help="stop on error occured",
+        action="store_true",
+        default=False,
     )
     parser.add_argument("-p", "--plugin", help="load plugin", action="append")
     parser.add_argument(
@@ -240,6 +244,7 @@ def main():
     handle_args(args)
 
     def handle_exception(loop, context):
+        registry.plugin_registry.notify("unload")
         print("Exception caught:\n", file=sys.stderr)
         message = context["message"]
         exp = context.get("exception")
