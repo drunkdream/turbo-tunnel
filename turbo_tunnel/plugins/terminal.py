@@ -32,7 +32,7 @@ class TerminalScreen(object):
         self._views = []
         self._running = True
         asyncio.ensure_future(self.check_screen_size_task())
-        atexit.register(lambda: curses.endwin())
+        # atexit.register(lambda: curses.endwin())
 
     @property
     def width(self):
@@ -44,6 +44,10 @@ class TerminalScreen(object):
 
     def __del__(self):
         self._running = False
+        try:
+            curses.endwin()
+        except:
+            pass
 
     def create_view(self, width, height, pos=None):
         pos = pos or (0, 0)
@@ -485,7 +489,11 @@ class TerminalPlugin(Plugin):
         self._term_tab = TerminalTable(
             "\x1b[36m%s \x1b[32mv%s\x1b[0m" % (BANNER.lstrip("\n").rstrip(), VERSION),
             [
-                {"title": "Source Address", "width": 18, "align": "left",},
+                {
+                    "title": "Source Address",
+                    "width": 18,
+                    "align": "left",
+                },
                 {"title": "Tunnel Address", "width": 24, "align": "left"},
                 {"title": "Target Address", "width": 32, "align": "left"},
                 {"title": "Start Time", "width": 20, "align": "left"},
