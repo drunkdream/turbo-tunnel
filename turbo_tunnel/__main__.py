@@ -93,6 +93,7 @@ class HighlightFormatter(logging.Formatter):
 def handle_args(args):
 
     if args.plugin:
+        registry.plugin_registry.enable()
         for plugin in args.plugin:
             for module in ("turbo_tunnel.plugins.%s" % plugin, plugin):
                 try:
