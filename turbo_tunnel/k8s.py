@@ -41,29 +41,13 @@ class KubernetesTunnel(websocket.WebSocketTunnel):
                 raise ValueError("Client cert file %s not exist" % client_cert)
             if not os.path.isfile(client_key):
                 raise ValueError("Client key file %s not exist" % client_key)
-        self._namespace = url.params.get("namespace", "default")
-        self._pod = url.params.get("pod")
-        if not self._pod:
-            raise utils.ParamError("Parameter `pod` must be specified")
-        container = url.params.get("container", "")
-        commands = [url.path, address[0], address[1]]
-        ws_url = "wss://%s:%d/api/v1/namespaces/%s/pods/%s/exec?container=%s&stdin=1&stdout=1&stderr=1&tty=0&%s" % (
-            url.host,
-            url.port,
-            self._namespace,
-            self._pod,
-            container,
-            "&".join([("command=%s" % it) for it in commands]),
-        )
-        # If `tty` is true, `stderr` MUST be false. Multiplexing is not supported
-        # in this case. The output of stdout and stderr will be combined to a
-        # single stream.
-        ws_url += "&ca_cert=%s&client_cert=%s&client_key=%s" % (
-            ca_cert,
-            client_cert,
-            client_key,
+        ws_url = self.build_websocket_url(
+            url, address, ca_cert, client_cert, client_key
         )
         super(KubernetesTunnel, self).__init__(tunnel, utils.Url(ws_url), address)
+
+    def build_websocket_url(self, url, address, ca_cert, client_cert, client_key):
+        raise NotImplementedError
 
     def handle_kebeconfig(self, kubeconfig_path):
         save_dir = tempfile.mkdtemp("kubeconfig")
@@ -106,7 +90,9 @@ class KubernetesTunnel(websocket.WebSocketTunnel):
             else:
                 client_cert_path = os.path.abspath(client_cert_path)
                 if not os.path.isfile(client_cert_path):
-                    raise RuntimeError("Client cert file %s not found" % client_cert_path)
+                    raise RuntimeError(
+                        "Client cert file %s not found" % client_cert_path
+                    )
 
             client_key_path = user.get("client-key")
             if not client_key_path:
@@ -128,7 +114,97 @@ class KubernetesTunnel(websocket.WebSocketTunnel):
             "client_key": client_key_path,
         }
 
-    async def _wait_for_connecting(self, timeout=15):
+    async def wait_for_connecting(self, timeout=15):
+        raise NotImplementedError
+
+    async def connect(self):
+        if not await super(KubernetesTunnel, self).connect():
+            return False
+        return await self.wait_for_connecting()
+
+
+class KubernetesPortForwardTunnel(KubernetesTunnel):
+    """Kubernetes Port Forward Tunnel"""
+
+    def __init__(self, tunnel, url, address):
+        super(KubernetesPortForwardTunnel, self).__init__(tunnel, url, address)
+
+    def build_websocket_url(self, url, address, ca_cert, client_cert, client_key):
+        namespace = url.params.get("namespace", "default")
+        ws_url = "wss://%s:%d/api/v1/namespaces/%s/pods/%s/portforward?ports=%d" % (
+            url.host,
+            url.port,
+            namespace,
+            address[0],
+            address[1],
+        )
+        ws_url += "&ca_cert=%s&client_cert=%s&client_key=%s" % (
+            ca_cert,
+            client_cert,
+            client_key,
+        )
+        return ws_url
+
+    async def wait_for_connecting(self, timeout=15):
+        for i in range(2):
+            buffer = await super(KubernetesPortForwardTunnel, self).read()
+            if len(buffer) != 3:
+                raise RuntimeError("Unexpected initial channel frame data size")
+            channel = buffer[0]
+            if channel != i:
+                raise RuntimeError("Unexpected channel %d" % channel)
+            port = buffer[1] + 256 * buffer[2]
+            if port != self._port:
+                raise RuntimeError(
+                    "Unexpected port number in initial channel frame: %d" % port
+                )
+        return True
+
+    async def read(self):
+        buffer = await super(KubernetesPortForwardTunnel, self).read()
+        if buffer[0] == 1:
+            raise RuntimeError("Channel error: %s" % buffer[1:].decode())
+        return buffer[1:]
+
+    async def write(self, buffer):
+        return await super(KubernetesPortForwardTunnel, self).write(b"\x00" + buffer)
+
+
+class KubernetesExecTunnel(KubernetesTunnel):
+    """Kubernetes Exec Tunnel"""
+
+    def __init__(self, tunnel, url, address):
+        super(KubernetesExecTunnel, self).__init__(tunnel, url, address)
+
+    def build_websocket_url(self, url, address, ca_cert, client_cert, client_key):
+        namespace = url.params.get("namespace", "default")
+        pod = url.params.get("pod")
+        if not pod:
+            raise utils.ParamError("Parameter `pod` must be specified")
+        container = url.params.get("container", "main")
+        commands = [url.path, address[0], address[1]]
+        ws_url = (
+            "wss://%s:%d/api/v1/namespaces/%s/pods/%s/exec?container=%s&stdin=1&stdout=1&stderr=1&tty=0&%s"
+            % (
+                url.host,
+                url.port,
+                namespace,
+                pod,
+                container,
+                "&".join([("command=%s" % it) for it in commands]),
+            )
+        )
+        # If `tty` is true, `stderr` MUST be false. Multiplexing is not supported
+        # in this case. The output of stdout and stderr will be combined to a
+        # single stream.
+        ws_url += "&ca_cert=%s&client_cert=%s&client_key=%s" % (
+            ca_cert,
+            client_cert,
+            client_key,
+        )
+        return ws_url
+
+    async def wait_for_connecting(self, timeout=15):
         time0 = time.time()
         while time.time() - time0 < timeout:
             _, stderr = await self.read_output()
@@ -168,17 +244,12 @@ class KubernetesTunnel(websocket.WebSocketTunnel):
             )
             return False
 
-    async def connect(self):
-        if not await super(KubernetesTunnel, self).connect():
-            return False
-        return await self._wait_for_connecting()
-
     async def write(self, buffer):
-        return await super(KubernetesTunnel, self).write(b"\x00" + buffer)
+        return await super(KubernetesExecTunnel, self).write(b"\x00" + buffer)
 
     async def read_output(self):
         while True:
-            buffer = await super(KubernetesTunnel, self).read()
+            buffer = await super(KubernetesExecTunnel, self).read()
             if len(buffer) <= 1:
                 continue
             if buffer[0] == 1:
@@ -197,4 +268,5 @@ class KubernetesTunnel(websocket.WebSocketTunnel):
             return stdout
 
 
-registry.tunnel_registry.register("k8s", KubernetesTunnel)
+registry.tunnel_registry.register("k8s", KubernetesPortForwardTunnel)
+registry.tunnel_registry.register("k8s+process", KubernetesExecTunnel)
