@@ -7,12 +7,13 @@ import os
 import random
 import socket
 import ssl
+import struct
 
 import tornado.tcpserver
 import tornado.websocket
 
 
-class MockK8SWebSocketHandler(tornado.websocket.WebSocketHandler):
+class MockK8SExecWebSocketHandler(tornado.websocket.WebSocketHandler):
     async def open(self, *args, **kwargs):
         print("[%s] Connection opened" % self.__class__.__name__)
         await self.write_message(b"\x02[OKAY]\n", True)
@@ -25,10 +26,29 @@ class MockK8SWebSocketHandler(tornado.websocket.WebSocketHandler):
         await self.write_message(b"\x01" + message, True)
 
 
+class MockK8SPortForwardWebSocketHandler(tornado.websocket.WebSocketHandler):
+    async def open(self, *args, **kwargs):
+        print("[%s] Connection opened" % self.__class__.__name__)
+        port = int(self.request.query_arguments["ports"][0].decode())
+        await self.write_message(b"\x00" + struct.pack("H", port), True)
+        await self.write_message(b"\x01" + struct.pack("H", port), True)
+
+    async def on_message(self, message):
+        if message[0] != 0:
+            raise RuntimeError("Invalid message: %r" % message)
+        message = message[1:]
+        print("[%s] Recevied message: %r" % (self.__class__.__name__, message))
+        await self.write_message(b"\x00" + message, True)
+
+
 def start_mock_k8s_websocket_server(port):
     res_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "res")
     handlers = [
-        ("/api/v1/namespaces/default/pods/pod-1/exec", MockK8SWebSocketHandler),
+        ("/api/v1/namespaces/default/pods/pod-1/exec", MockK8SExecWebSocketHandler),
+        (
+            "/api/v1/namespaces/default/pods/pod-1/portforward",
+            MockK8SPortForwardWebSocketHandler,
+        ),
     ]
     app = tornado.web.Application(handlers)
     app.listen(
