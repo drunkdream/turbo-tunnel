@@ -410,11 +410,22 @@ def is_ip_address(addr):
     return is_ipv4_address(addr) or is_ipv6_address(addr)
 
 
-def get_nameserver():
+def get_nameservers():
     name_servers = async_dns.core.config.get_nameservers()
     name_servers = [it for it in name_servers if "." in it]
     name_servers.extend(async_dns.core.config.core_config.get("default_nameservers"))
     return name_servers
+
+
+def get_domain_suffixes():
+    resolve_file = "/etc/resolv.conf"
+    if not os.path.isfile(resolve_file):
+        return []
+    with open(resolve_file) as fp:
+        for line in fp.readlines():
+            if line.startswith("search"):
+                return line.strip().split()[1:]
+    return []
 
 
 def patch_async_dns():
@@ -429,8 +440,9 @@ def patch_async_dns():
                 )
 
 
-name_servers = get_nameserver()
+name_servers = get_nameservers()
 assert len(name_servers) > 0
+domain_suffixes = get_domain_suffixes()
 
 resovle_timeout = 600
 resolve_cache = {}
@@ -443,30 +455,35 @@ async def resolve_address(address):
             and time.time() - resolve_cache[address]["time"] <= resovle_timeout
         ):
             return resolve_cache[address]["result"]
+        domain_list = [address[0]]
+        if domain_suffixes:
+            for suffix in domain_suffixes:
+                domain_list.append(address[0] + "." + suffix)
 
         patch_async_dns()
         resolver = async_dns.resolver.DNSClient()
         result = address
-        res = None
-        for name_server in name_servers:
-            try:
-                res = await resolver.query(
-                    address[0],
-                    async_dns.core.types.A,
-                    async_dns.core.Address.parse(name_server),
-                )
-            except asyncio.TimeoutError:
-                pass
-            else:
-                break
-        if res:
-            addr_list = res.an
-            for it in addr_list:
-                if it.data.type_name == "a":
-                    result = (it.data.data, address[1])
+        for domain in domain_list:
+            res = None
+            for name_server in name_servers:
+                try:
+                    res = await resolver.query(
+                        domain,
+                        async_dns.core.types.A,
+                        async_dns.core.Address.parse(name_server),
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                else:
                     break
-            resolve_cache[address] = {"time": time.time(), "result": result}
-            return result
+            if res:
+                addr_list = res.an
+                for it in addr_list:
+                    if it.data.type_name == "a":
+                        result = (it.data.data, address[1])
+                        break
+                resolve_cache[address] = {"time": time.time(), "result": result}
+                return result
     return address
 
 
