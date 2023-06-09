@@ -20,6 +20,8 @@ import tornado.httpclient
 import tornado.iostream
 import tornado.netutil
 
+TLDS = [".com", ".net", ".cn", ".org", ".io"]
+
 logger = logging.getLogger("turbo-tunnel")
 
 
@@ -448,6 +450,31 @@ resovle_timeout = 600
 resolve_cache = {}
 
 
+def is_public_domain(domain):
+    for it in TLDS:
+        if domain.endswith(it):
+            return True
+    return False
+
+
+async def _resolve(resolver, name_server, domain, queue):
+    res = None
+    try:
+        res = await resolver.query(
+            domain, async_dns.core.types.A, async_dns.core.Address.parse(name_server),
+        )
+    except asyncio.TimeoutError:
+        pass
+
+    if res and res.an:
+        addr_list = res.an
+        for it in addr_list:
+            if it.data.type_name == "a":
+                result = it.data.data
+                await queue.put(result)
+                return
+
+
 async def resolve_address(address):
     if not is_ip_address(address[0]):
         if (
@@ -456,34 +483,42 @@ async def resolve_address(address):
         ):
             return resolve_cache[address]["result"]
         domain_list = [address[0]]
-        if domain_suffixes:
+        if domain_suffixes and not is_public_domain(address[0]):
             for suffix in domain_suffixes:
                 domain_list.append(address[0] + "." + suffix)
 
         patch_async_dns()
         resolver = async_dns.resolver.DNSClient()
         result = address
-        for domain in domain_list:
-            res = None
-            for name_server in name_servers:
-                try:
-                    res = await resolver.query(
-                        domain,
-                        async_dns.core.types.A,
-                        async_dns.core.Address.parse(name_server),
-                    )
-                except asyncio.TimeoutError:
-                    pass
-                else:
+
+        tasks = []
+        queue = asyncio.Queue()
+
+        for name_server in name_servers:
+            for domain in domain_list:
+                tasks.append(
+                    safe_ensure_future(_resolve(resolver, name_server, domain, queue))
+                )
+
+        while True:
+            try:
+                item = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                if not tasks:
+                    logger.warning("[DNS] Resolve %s failed" % address[0])
                     break
-            if res:
-                addr_list = res.an
-                for it in addr_list:
-                    if it.data.type_name == "a":
-                        result = (it.data.data, address[1])
+                for task in tasks:
+                    if task.done():
+                        tasks.remove(task)
                         break
-                resolve_cache[address] = {"time": time.time(), "result": result}
-                return result
+                await asyncio.sleep(0.005)
+            else:
+                result = (item, result[1])
+                logger.info("[DNS] %s => %s" % (address[0], item))
+                break
+
+        resolve_cache[address] = {"time": time.time(), "result": result}
+
     return address
 
 
@@ -531,7 +566,9 @@ async def create_process(cmdline, stdout=None, stderr=None):
         if redirect_stderr:
             _stderr = subprocess.PIPE
             stderr = sys.stderr
-        proc = await asyncio.create_subprocess_shell(cmdline, stdout=_stdout, stderr=_stderr)
+        proc = await asyncio.create_subprocess_shell(
+            cmdline, stdout=_stdout, stderr=_stderr
+        )
         if redirect_stdout:
             safe_ensure_future(redirect_process_pipe(proc, proc.stdout, stdout))
         if redirect_stderr:
