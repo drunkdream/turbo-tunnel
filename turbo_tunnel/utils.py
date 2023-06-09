@@ -490,7 +490,6 @@ async def resolve_address(address):
         patch_async_dns()
         resolver = async_dns.resolver.DNSClient()
         result = address
-
         tasks = []
         queue = asyncio.Queue()
 
@@ -518,6 +517,7 @@ async def resolve_address(address):
                 break
 
         resolve_cache[address] = {"time": time.time(), "result": result}
+        return result
 
     return address
 
