@@ -332,13 +332,12 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
 
     async def read_until(self, delimiter, max_bytes=None):
         while True:
-            if not self._buffer:
-                if not self._tunnel:
-                    assert not self._buffer
-                    raise tornado.iostream.StreamClosedError()
-                if self._read_event.is_set():
-                    self._read_event.clear()
-                await self._read_event.wait()
+            if not self._tunnel:
+                assert not self._buffer
+                raise tornado.iostream.StreamClosedError()
+            if self._read_event.is_set():
+                self._read_event.clear()
+            await self._read_event.wait()
 
             if not self._buffer:
                 raise tornado.iostream.StreamClosedError()
@@ -351,13 +350,12 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
     async def read_until_regex(self, regex, max_bytes=None):
         read_regex = re.compile(regex)
         while True:
-            if not self._buffer:
-                if not self._tunnel:
-                    assert not self._buffer
-                    raise tornado.iostream.StreamClosedError()
-                if self._read_event.is_set():
-                    self._read_event.clear()
-                await self._read_event.wait()
+            if not self._tunnel:
+                assert not self._buffer
+                raise tornado.iostream.StreamClosedError()
+            if self._read_event.is_set():
+                self._read_event.clear()
+            await self._read_event.wait()
 
             if not self._buffer:
                 raise tornado.iostream.StreamClosedError()

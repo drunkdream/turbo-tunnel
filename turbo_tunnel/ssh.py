@@ -441,6 +441,11 @@ class SSHTunnel(tunnel.Tunnel):
                 ssh_conn.abort()
                 await ssh_conn.wait_closed()
                 return None
+            except asyncssh.ConnectionLost:
+                utils.logger.warning(
+                    "[%s] SSH connection already closed" % self.__class__.__name__
+                )
+                return None
             else:
                 ssh_conn.set_keepalive(10)
             self.__class__.ssh_conns[key] = ssh_conn
