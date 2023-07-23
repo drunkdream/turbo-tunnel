@@ -3,7 +3,6 @@
 """
 
 import asyncio
-import atexit
 import curses
 import math
 import sys
@@ -11,9 +10,7 @@ import time
 import traceback
 
 from . import Plugin
-from .. import BANNER, VERSION
-from ..registry import plugin_registry
-from ..utils import logger
+from .. import registry, utils, BANNER, VERSION
 
 
 curses_colors = {}
@@ -96,50 +93,44 @@ class TerminalView(object):
 
     def move(self, pos):
         self.clear()
-        self.refresh()
+        # self.refresh()
         try:
             self._view.mvwin(pos[1], pos[0])
             self._view.mvderwin(pos[1], pos[0])
         except:
-            logger.exception(
+            utils.logger.exception(
                 "[%s] Move terminal view to %d,%d failed"
                 % (self.__class__.__name__, pos[0], pos[1])
             )
             return
 
-        for i in range(self._height):
-            row = len(self._buffer) - self._height + i
-            if row < 0 or len(self._buffer) <= row:
-                continue
-            for j in range(min(len(self._buffer[row]), self._width)):
-                c, color = self._buffer[row][j]
-                try:
-                    if color is not None:
-                        self._view.addstr(i, j, c, color)
-                    else:
-                        self._view.addstr(i, j, c)
-                except:
-                    continue
-                    # raise Exception("Write to (%d,%d) failed" % (j, i))
-        self.refresh()
+        for i in range(min(len(self._buffer), self._height)):
+            for j in range(min(len(self._buffer[i]), self._width) - 1):
+                c, color = self._buffer[i][j]
+                self._addstr((j, i), c, color)
+
+        # self.refresh()
 
     def resize(self, width=None, height=None):
         width = width or self._width
         height = height or self._height
+        if self._last_pos[1] > height:
+            self.scroll(self._last_pos[1] - height)
+            self._last_pos[1] = height
+
+        self._width = width
+        self._height = height
+
         try:
             self._view.resize(height, width)
         except:
-            logger.exception(
+            utils.logger.exception(
                 "[%s] Resize terminal view to %d:%d failed"
                 % (self.__class__.__name__, width, height)
             )
             return
-        if self._last_pos[1] >= height:
-            self.scroll(self._last_pos[1] - height)
-            self._last_pos[1] = height - 1
-        self._width = width
-        self._height = height
-        self._view.refresh()
+
+        self.refresh()
 
     def get_color(self, color):
         if color in curses_colors:
@@ -184,8 +175,11 @@ class TerminalView(object):
 
     def scroll(self, rows):
         self._view.scroll(rows)
-        for i in range(self._height - rows - 1):
+        for i in range(len(self._buffer) - rows):
             self._buffer[i] = self._buffer[i + rows][:]
+        for i in range(len(self._buffer) - rows, len(self._buffer)):
+            self._buffer[i] = []
+        self.refresh()
 
     def _set_buffer(self, x, y, data):
         if len(self._buffer) <= y:
@@ -195,6 +189,19 @@ class TerminalView(object):
             for _ in range(len(self._buffer[y]), x + 1):
                 self._buffer[y].append((" ", None))
         self._buffer[y][x] = data
+
+    def _addstr(self, pos, content, color=None):
+        try:
+            if color is not None:
+                self._view.addstr(pos[1], pos[0], content, color)
+            else:
+                self._view.addstr(pos[1], pos[0], content)
+        except:
+            pass
+            # utils.logger.exception(
+            #     "[%s] addstr %r at position (%d, %d) failed"
+            #     % (self.__class__.__name__, content, pos[0], pos[1])
+            # )
 
     def write_string(self, content, pos, color=None, auto_wrap=True):
         if not content:
@@ -218,10 +225,7 @@ class TerminalView(object):
                 x = x % self._width
             self._set_buffer(x, y, (c, color))
 
-        if color is not None:
-            self._view.addstr(pos[1], pos[0], content, color)
-        else:
-            self._view.addstr(pos[1], pos[0], content)
+        self._addstr(pos, content, color)
 
     def write_buffer(
         self, buffer, pos=None, append=True, auto_wrap=True, refresh=False
@@ -448,39 +452,42 @@ class TerminalPlugin(Plugin):
     """Show connections in terminal"""
 
     flush_internal = 1
+    banner_lines = len(BANNER.splitlines()) + 1
+    blank_lines = 2
     conn_opened_color = "\x1b[32m"
     conn_closed_color = "\x1b[1;31m"
 
     def on_screen_size_changed(self, width, height):
-        table_height, log_height = self._get_view_height(height)
-        if height > self._screen.height:
-            self._log_view.move((0, table_height))
-            self._table_view.resize(width, table_height)
-            self._log_view.resize(width, log_height)
-        else:
-            self._table_view.resize(width, table_height)
-            self._log_view.move((0, table_height))
-            self._log_view.resize(width, log_height - 1)
+        utils.logger.info(
+            "[%s] Screen size changed from (%d, %d) to (%d, %d)"
+            % (
+                self.__class__.__name__,
+                self._screen.width,
+                self._screen.height,
+                width,
+                height,
+            )
+        )
+        table_height = self._table_view.height
+        self._table_view.resize(width, table_height)
+        log_height = height - table_height
+        self._log_view.resize(width, log_height)
 
     def _patch_output(self, view):
         origin_stdout = sys.stdout
         origin_stderr = sys.stderr
         sys.stdout = sys.stderr = TerminalLogger(view, origin_stderr)
-        for handler in logger.handlers:
+        for handler in utils.logger.handlers:
             handler.stream = sys.stdout
         return origin_stdout, origin_stderr
 
-    def _get_view_height(self, screen_height):
-        min_table_view_height = 15
-        max_log_view_height = 15
-        table_height = screen_height - max_log_view_height
-        if table_height < min_table_view_height:
-            table_height = min_table_view_height
-        return table_height, screen_height - table_height
+    def _get_init_view_height(self, screen_height):
+        min_table_view_height = self.banner_lines + self.blank_lines
+        return min_table_view_height, screen_height - min_table_view_height
 
     def on_load(self):
         self._screen = TerminalScreen(self)
-        table_height, log_height = self._get_view_height(self._screen.height)
+        table_height, log_height = self._get_init_view_height(self._screen.height)
         self._table_view = self._screen.create_view(self._screen.width, table_height)
         self._log_view = self._screen.create_view(
             self._screen.width, log_height, (0, table_height)
@@ -526,7 +533,7 @@ class TerminalPlugin(Plugin):
         for conn in self._conn_list:
             if conn.client_address == src_addr and conn.target_address == dst_addr:
                 return conn
-        logger.warn(
+        utils.logger.warning(
             "[%s] Connection %s:%d => %s:%d not found"
             % (
                 self.__class__.__name__,
@@ -609,8 +616,21 @@ class TerminalPlugin(Plugin):
                     closed_conns.append(conn)
 
                 data_table.append(data)
+
+            if len(data_table) + self.banner_lines + self.blank_lines > self._table_view.height:
+                table_view_height = len(data_table) + self.banner_lines + self.blank_lines
+                log_view_height = self._screen.height - table_view_height
+                self._log_view.resize(self._log_view.width, log_view_height)
+                self._log_view.move((0, table_view_height))
+                self._table_view.resize(self._table_view.width, table_view_height)
+            elif len(data_table) + self.banner_lines + self.blank_lines < self._table_view.height:
+                table_view_height = len(data_table) + self.banner_lines + self.blank_lines
+                log_view_height = self._screen.height - table_view_height
+                self._table_view.resize(self._table_view.width, table_view_height)
+                self._log_view.move((0, table_view_height))
+                self._log_view.resize(self._log_view.width, log_view_height)
             self._term_tab.render(data_table)
             await asyncio.sleep(self.flush_internal)
 
 
-plugin_registry.register(TerminalPlugin)
+registry.plugin_registry.register(TerminalPlugin)
