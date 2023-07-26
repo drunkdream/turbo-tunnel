@@ -105,7 +105,7 @@ class TerminalView(object):
             return
 
         for i in range(min(len(self._buffer), self._height)):
-            for j in range(min(len(self._buffer[i]), self._width) - 1):
+            for j in range(min(len(self._buffer[i]), self._width)):
                 c, color = self._buffer[i][j]
                 self._addstr((j, i), c, color)
 
