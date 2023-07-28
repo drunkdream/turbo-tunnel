@@ -176,10 +176,10 @@ class WebSocketTunnel(tunnel.Tunnel):
         headers = {}
         auth_data = self._url.auth
         if auth_data:
-            basic_auth = "Basic %s" % auth.http_basic_auth(
-                *auth_data.split(":")
-            )
-            headers["X-Proxy-Authorization"] = headers["Proxy-Authorization"] = basic_auth
+            basic_auth = "Basic %s" % auth.http_basic_auth(*auth_data.split(":"))
+            headers["X-Proxy-Authorization"] = headers[
+                "Proxy-Authorization"
+            ] = basic_auth
         ca_cert = self._url.params.pop("ca_cert", None)
         client_key = self._url.params.pop("client_key", None)
         client_cert = self._url.params.pop("client_cert", None)
@@ -259,14 +259,23 @@ class WebSocketTunnelServer(server.TunnelServer):
                 """connect target server"""
                 address = None
                 ret = re.match(this._listen_url.path, self.request.path)
-                if ret:
-                    addr = ret.groupdict().get("addr")
-                    port = ret.groupdict().get("port")
-                    if addr and port and port.isdigit():
-                        address = addr, int(port)
-                if not address:
+                if not ret:
                     self.set_status(404, "Not Found")
                     return False
+                addr = ret.groupdict().get("addr")
+                port = ret.groupdict().get("port")
+                if addr and port and port.isdigit():
+                    address = addr, int(port)
+                else:
+                    if (
+                        len(this._tunnel_urls) != 1
+                        or this._tunnel_urls[0].protocol != "tcp"
+                    ):
+                        self.set_status(400, "Bad Request")
+                        return False
+                    next_tunnel = this._tunnel_urls[0]
+                    address = next_tunnel.address
+
                 auth_data = this._listen_url.auth
                 if auth_data:
                     auth_data = auth_data.split(":")
@@ -349,6 +358,7 @@ class WebSocketTunnelServer(server.TunnelServer):
             addr=r"(?P<addr>[\w\.-]+)", port=r"(?P<port>\d+)"
         )
         self._listen_url.path = path
+
         handlers = [
             (path, WebSocketProxyHandler),
         ]
