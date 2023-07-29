@@ -205,7 +205,7 @@ class AsyncTaskManager(object):
     async def wait_for_tasks(self, tasks):
         """wait until one task complete"""
         task_list = [asyncio.ensure_future(self.wrap_task(task)) for task in tasks]
-        await asyncio.wait(task_list, return_when=asyncio.FIRST_COMPLETED)
+        await wait_for_tasks(task_list, return_when=asyncio.FIRST_COMPLETED)
         # await asyncio.sleep(0.1)
         for i, task in enumerate(tasks):
             if not task in self._async_tasks:
@@ -461,7 +461,9 @@ async def _resolve(resolver, name_server, domain, queue):
     res = None
     try:
         res = await resolver.query(
-            domain, async_dns.core.types.A, async_dns.core.Address.parse(name_server),
+            domain,
+            async_dns.core.types.A,
+            async_dns.core.Address.parse(name_server),
         )
     except asyncio.TimeoutError:
         pass
@@ -534,6 +536,15 @@ def safe_ensure_future(coro, loop=None):
 
     asyncio.ensure_future(_wrap())
     return fut
+
+
+async def wait_for_tasks(tasks, return_when):
+    if hasattr(asyncio, "create_task"):
+        tasks = [
+            asyncio.create_task(task) if not isinstance(task, asyncio.Task) else task
+            for task in tasks
+        ]
+    return await asyncio.wait(tasks, return_when=return_when)
 
 
 def win32_daemon():

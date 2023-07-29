@@ -200,7 +200,7 @@ class MicroSSHServer(asyncssh.SSHServer):
             if stderr and tasks[2] is None:
                 tasks[2] = utils.safe_ensure_future(stderr.read(4096))
 
-            done_tasks, _ = await asyncio.wait(
+            done_tasks, _ = await utils.wait_for_tasks(
                 tasks, return_when=asyncio.FIRST_COMPLETED
             )
 

@@ -192,4 +192,6 @@ Built-in plugins:
 turbo-tunnel -l http://127.0.0.1:8080 -p terminal -p xxx
 ```
 
+![](https://raw.githubusercontent.com/turbo-tunnel/docs/master/docs/images/terminal.png)
+
 User can use `-p` or `--plugin` params to specify `1-N` plugins. Plugin load order is decided by `-p` params order.

@@ -186,4 +186,6 @@ turbo-tunnel 允许用户开发自己的插件，以支持新的代理服务或�
 $ turbo-tunnel -l http://127.0.0.1:8080 -p terminal -p xxx
 ```
 
+![](https://raw.githubusercontent.com/turbo-tunnel/docs/master/docs/images/terminal.png)
+
 通过`-p`或`--plugin`可以指定`1-N`个插件，插件加载顺序由启动命令行中`-p`参数的顺序决定。

@@ -230,7 +230,7 @@ class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
                         self.forward_data_to_downstream(
                             tun_conn, downstream, tunnel_chain.tail))
                 ]
-                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                await utils.wait_for_tasks(tasks, return_when=asyncio.FIRST_COMPLETED)
                 downstream.close()
 
     def start(self):
