@@ -178,7 +178,7 @@ class Socks4TunnelServer(server.TCPTunnelServer):
                         tun_conn, downstream, tunnel_chain.tail
                     ),
                 ]
-                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                await utils.wait_for_tasks(tasks, return_when=asyncio.FIRST_COMPLETED)
                 downstream.close()
 
 
@@ -764,7 +764,7 @@ class Socks5TunnelServer(server.TCPTunnelServer):
                         tun_conn, downstream, tunnel_chain.tail
                     ),
                 ]
-                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                await utils.wait_for_tasks(tasks, return_when=asyncio.FIRST_COMPLETED)
                 downstream.close()
 
 
