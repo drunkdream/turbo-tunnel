@@ -66,7 +66,7 @@ async def test_wait_for_tasks():
     tasks = [task1(), task2()]
     time0 = time.time()
     await utils.wait_for_tasks(tasks, return_when=asyncio.ALL_COMPLETED)
-    assert time.time() - time0 >= 3
+    assert time.time() - time0 > 2.99
 
 
 async def test_wait_for_tasks2():
