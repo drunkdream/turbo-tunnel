@@ -1,0 +1,14 @@
+# misc
+.git/
+.github/
+*.*ignore
+.editorconfig
+
+tests/
+Dockerfile*
+README_*.md
+LICENSE*
+
+# build
+build.py
+MANIFEST.in

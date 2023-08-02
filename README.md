@@ -10,7 +10,7 @@
 ![Unittest](https://github.com/drunkdream/turbo-tunnel/workflows/Unittest/badge.svg)
 [![codecov.io](https://codecov.io/github/drunkdream/turbo-tunnel/coverage.svg?branch=master)](https://codecov.io/github/drunkdream/turbo-tunnel)
 
-[中文README](./README_zh.md)
+[中文 README](./README_zh.md)
 
 ## Runtime Environment
 
@@ -195,3 +195,20 @@ turbo-tunnel -l http://127.0.0.1:8080 -p terminal -p xxx
 ![](https://raw.githubusercontent.com/turbo-tunnel/docs/master/docs/images/terminal.png)
 
 User can use `-p` or `--plugin` params to specify `1-N` plugins. Plugin load order is decided by `-p` params order.
+
+### Docker
+
+- build
+
+```bash
+# AMD64
+docker buildx build --platform 'linux/amd64' -t turbo-tunnel:amd64 .
+
+# ARM64
+docker buildx build --platform 'linux/arm64' -t turbo-tunnel:arm64 .
+
+# Multi
+docker buildx create --use --platform=linux/arm64,linux/amd64 --name multi-platform-builder
+docker buildx inspect --bootstrap
+docker buildx build --platform 'linux/amd64,linux/arm64' -t turbo-tunnel:latest .
+```

@@ -20,7 +20,7 @@
 - 提供访问各种不同隧道/代理服务的能力
 - 支持的隧道/代理服务类型包括：`https`、`socks4`、`socks5`、`websocket`、`ssh`、`icmp`、`k8s`
 - 支持创建的隧道/代理服务类型有：`https`、`socks4`、`socks5`、`websocket`
-- 支持TCP端口映射、SSL端口映射
+- 支持 TCP 端口映射、SSL 端口映射
 - 支持通过配置文件的方式，指定不同的策略，允许使用不同的代理服务访问不同的目标服务
 
 ## 安装方法
@@ -189,3 +189,20 @@ $ turbo-tunnel -l http://127.0.0.1:8080 -p terminal -p xxx
 ![](https://raw.githubusercontent.com/turbo-tunnel/docs/master/docs/images/terminal.png)
 
 通过`-p`或`--plugin`可以指定`1-N`个插件，插件加载顺序由启动命令行中`-p`参数的顺序决定。
+
+### Docker
+
+- 构建
+
+```bash
+# AMD64
+docker buildx build --platform 'linux/amd64' -t turbo-tunnel:amd64 .
+
+# ARM64
+docker buildx build --platform 'linux/arm64' -t turbo-tunnel:arm64 .
+
+# Multi
+docker buildx create --use --platform=linux/arm64,linux/amd64 --name multi-platform-builder
+docker buildx inspect --bootstrap
+docker buildx build --platform 'linux/amd64,linux/arm64' -t turbo-tunnel:latest .
+```
