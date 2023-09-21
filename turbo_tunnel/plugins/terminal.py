@@ -469,6 +469,8 @@ class TerminalPlugin(Plugin):
             )
         )
         table_height = self._table_view.height
+        if table_height >= height:
+            table_height = height - 1
         self._table_view.resize(width, table_height)
         log_height = height - table_height
         self._log_view.resize(width, log_height)
@@ -620,9 +622,10 @@ class TerminalPlugin(Plugin):
             if len(data_table) + self.banner_lines + self.blank_lines > self._table_view.height:
                 table_view_height = len(data_table) + self.banner_lines + self.blank_lines
                 log_view_height = self._screen.height - table_view_height
-                self._log_view.resize(self._log_view.width, log_view_height)
-                self._log_view.move((0, table_view_height))
-                self._table_view.resize(self._table_view.width, table_view_height)
+                if log_view_height > 0:
+                    self._log_view.resize(self._log_view.width, log_view_height)
+                    self._log_view.move((0, table_view_height))
+                    self._table_view.resize(self._table_view.width, table_view_height)
             elif len(data_table) + self.banner_lines + self.blank_lines < self._table_view.height:
                 table_view_height = len(data_table) + self.banner_lines + self.blank_lines
                 log_view_height = self._screen.height - table_view_height
