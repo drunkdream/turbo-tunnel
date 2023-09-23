@@ -8,6 +8,7 @@ import inspect
 import re
 import socket
 import ssl
+import traceback
 import time
 
 import tornado.iostream
@@ -556,7 +557,10 @@ class TunnelTransport(asyncio.Transport):
 
     def _force_close(self, exc):
         self.close()
-        raise exc
+        utils.logger.error(
+            "[%s] Tunnel closed on exception: \n%s"
+            % (self.__class__.__name__, "".join(traceback.format_tb(exc.__traceback__)))
+        )
 
     def closed(self):
         return not self._tunnel or self._tunnel.closed()
