@@ -15,7 +15,6 @@ from . import utils
 
 
 class EnumSocks5AuthMethod(object):
-
     NO_AUTH = 0
     GSSAPI = 1
     PASSWORD = 2
@@ -23,14 +22,12 @@ class EnumSocks5AuthMethod(object):
 
 
 class EnumSocks5Command(object):
-
     CONNECT = 1
     BIND = 2
     UDP_ASSOCIATE = 3
 
 
 class EnumSocks5AddressType(object):
-
     IPV4 = 1
     DOMAIN = 3
     IPV6 = 4
@@ -168,6 +165,10 @@ class Socks4TunnelServer(server.TCPTunnelServer):
                     await downstream.write(response.serialize())
                     stream.close()
                     return
+
+                if tunnel_chain.tunnel_urls:
+                    tunnel_url = tunnel_chain.tunnel_urls[-1]
+                    tun_conn.update_tunnel_address((tunnel_url.host, tunnel_url.port))
                 response = Socks4ResponsePacket(True)
                 await downstream.write(response.serialize())
                 tasks = [
@@ -752,6 +753,9 @@ class Socks5TunnelServer(server.TCPTunnelServer):
                     stream.close()
                     return
 
+                if tunnel_chain.tunnel_urls:
+                    tunnel_url = tunnel_chain.tunnel_urls[-1]
+                    tun_conn.update_tunnel_address((tunnel_url.host, tunnel_url.port))
                 connect_response = Socks5ConnectResponsePacket(
                     0, resolved_target_address
                 )
