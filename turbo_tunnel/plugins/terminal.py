@@ -496,11 +496,7 @@ class TerminalPlugin(Plugin):
         self._term_tab = TerminalTable(
             "\x1b[36m%s \x1b[32mv%s\x1b[0m" % (BANNER.lstrip("\n").rstrip(), VERSION),
             [
-                {
-                    "title": "Source Address",
-                    "width": 18,
-                    "align": "left",
-                },
+                {"title": "Source Address", "width": 18, "align": "left",},
                 {"title": "Tunnel Address", "width": 24, "align": "left"},
                 {"title": "Target Address", "width": 32, "align": "left"},
                 {"title": "Start Time", "width": 20, "align": "left"},
@@ -617,14 +613,29 @@ class TerminalPlugin(Plugin):
 
                 data_table.append(data)
 
-            if len(data_table) + self.banner_lines + self.blank_lines > self._table_view.height:
-                table_view_height = len(data_table) + self.banner_lines + self.blank_lines
+            if (
+                len(data_table) + self.banner_lines + self.blank_lines
+                > self._table_view.height
+            ):
+                table_view_height = (
+                    len(data_table) + self.banner_lines + self.blank_lines
+                )
+                if table_view_height > self._screen.height:
+                    table_view_height = self._screen.height
+                    data_table = data_table[
+                        : table_view_height - self.banner_lines - self.blank_lines
+                    ]
                 log_view_height = self._screen.height - table_view_height
                 self._log_view.resize(self._log_view.width, log_view_height)
                 self._log_view.move((0, table_view_height))
                 self._table_view.resize(self._table_view.width, table_view_height)
-            elif len(data_table) + self.banner_lines + self.blank_lines < self._table_view.height:
-                table_view_height = len(data_table) + self.banner_lines + self.blank_lines
+            elif (
+                len(data_table) + self.banner_lines + self.blank_lines
+                < self._table_view.height
+            ):
+                table_view_height = (
+                    len(data_table) + self.banner_lines + self.blank_lines
+                )
                 log_view_height = self._screen.height - table_view_height
                 self._table_view.resize(self._table_view.width, table_view_height)
                 self._log_view.move((0, table_view_height))
