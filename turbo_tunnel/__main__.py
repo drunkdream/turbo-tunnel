@@ -131,7 +131,7 @@ def handle_args(args):
     if args.log_file:
         log_file = os.path.abspath(args.log_file)
 
-    handler = logging.StreamHandler()
+    handler = logging.StreamHandler(sys.stdout)
     fmt = "[%(asctime)s][%(levelname)s]%(message)s"
     enable_color_output = not args.no_color
     if enable_color_output and sys.platform == "win32":
@@ -236,7 +236,7 @@ def main():
         import daemon
 
         # fork must be called before create event loop
-        daemon.DaemonContext(stderr=open("error.txt", "w")).open()
+        daemon.DaemonContext(stderr=open("turbo-tunnel.error.log", "w")).open()
     elif args.daemon:
         utils.win32_daemon()
         return 0
