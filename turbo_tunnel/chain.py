@@ -189,8 +189,9 @@ class TunnelChain(object):
             if i < len(tunnel_urls) - 1:
                 next_url = tunnel_urls[i + 1]
                 next_address = await self.get_tunnel_address(next_url)
-            if self._tunnel_router:
+            if self._tunnel_router and url.params.get("server_resolve", "false") != "true":
                 next_address = await self._tunnel_router.resolve(next_address)
+
             tunn = tunnel_class(tunn, url, next_address)
             self._tunnel_list.append(tunn)
 
