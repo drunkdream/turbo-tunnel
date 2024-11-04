@@ -23,7 +23,7 @@ import tornado.netutil
 TLDS = [".com", ".net", ".cn", ".org", ".io"]
 
 logger = logging.getLogger("turbo-tunnel")
-
+default_resolve_file = "/etc/resolv.conf"
 
 def verbose_logging(msg):
     if logger.level < logging.DEBUG:
@@ -413,6 +413,8 @@ def is_ip_address(addr):
 
 
 def get_nameservers():
+    if sys.platform == "darwin" and not os.path.isfile(default_resolve_file):
+        return []
     name_servers = async_dns.core.config.get_nameservers()
     name_servers = [it for it in name_servers if "." in it]
     name_servers.extend(async_dns.core.config.core_config.get("default_nameservers"))
@@ -420,10 +422,9 @@ def get_nameservers():
 
 
 def get_domain_suffixes():
-    resolve_file = "/etc/resolv.conf"
-    if not os.path.isfile(resolve_file):
+    if not os.path.isfile(default_resolve_file):
         return []
-    with open(resolve_file) as fp:
+    with open(default_resolve_file) as fp:
         for line in fp.readlines():
             if line.startswith("search"):
                 return line.strip().split()[1:]
@@ -443,7 +444,8 @@ def patch_async_dns():
 
 
 name_servers = get_nameservers()
-assert len(name_servers) > 0
+if sys.platform != "darwin":
+    assert len(name_servers) > 0
 domain_suffixes = get_domain_suffixes()
 
 resovle_timeout = 600
