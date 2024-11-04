@@ -2,6 +2,6 @@ async_dns
 asyncssh>=2.3.0,<2.9.0; python_version >= '3.6'
 cryptography<37.0.0; python_version >= '3.6'
 msgpack
-python-daemon
+python-daemon==2.3.2
 pyyaml
 tornado==6.1

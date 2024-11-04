@@ -65,8 +65,9 @@ async def test_conf_yaml():
     assert config.listen_urls[0] == "http://127.0.0.1:6666"
     assert config.listen_urls[1] == "socks5://127.0.0.1:7777"
 
-    assert len(config.tunnels) == 4
-    assert config.tunnels[-1].id == "test"
+    assert len(config.tunnels) == 5
+    assert config.tunnels[-2].id == "test"
+    assert config.tunnels[-1].id == "default"
 
     rules = config.rules
     assert rules[0].id == "local"

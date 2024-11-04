@@ -184,8 +184,18 @@ class TunnelConfiguration(object):
                     self._listen_urls.append(listen_urls)
 
             self._tunnels = []
+            has_default_tunnel = False
             for tunnel in self._conf_obj.get("tunnels", []):
-                self._tunnels.append(Tunnel(tunnel))
+                tunn = Tunnel(tunnel)
+                if not has_default_tunnel and tunn.is_default():
+                    has_default_tunnel = True
+                self._tunnels.append(tunn)
+            if not has_default_tunnel:
+                self._tunnels.append(Tunnel({
+                    "id": "default",
+                    "url": "tcp://",
+                    "default": True
+                }))
             self._rules = []
             for rule in self._conf_obj.get("rules", []):
                 self._rules.append(TunnelRule(rule))
