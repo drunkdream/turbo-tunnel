@@ -676,8 +676,23 @@ class Socks5TunnelServer(server.TCPTunnelServer):
                 password_response = Socks5PasswordAuthResponsePacket(0)
                 await downstream.write(password_response.serialize())
         elif auth:
-            auth_response = Socks5AuthResponsePacket(EnumSocks5AuthMethod.NOT_SUPPORTED)
+            if (
+                len(auth_request.auth_methods) == 1
+                and auth_request.auth_methods[0] == EnumSocks5AuthMethod.NO_AUTH
+            ):
+                utils.logger.warn("[%s] Auth required" % self.__class__.__name__)
+                auth_response = Socks5PasswordAuthResponsePacket(1)
+            else:
+                utils.logger.warn(
+                    "[%s] Auth %s not supported"
+                    % (self.__class__.__name__, auth_request.auth_methods)
+                )
+                auth_response = Socks5AuthResponsePacket(
+                    EnumSocks5AuthMethod.NOT_SUPPORTED
+                )
+            await downstream.write(auth_response.serialize())
             stream.close()
+            return
         else:
             auth_response = Socks5AuthResponsePacket(EnumSocks5AuthMethod.NO_AUTH)
             await downstream.write(auth_response.serialize())
