@@ -156,6 +156,8 @@ class WebSocketTunnelConnection(tornado.websocket.WebSocketClientConnection):
         return self._buffers.pop(0)
 
     async def write(self, buffer):
+        if isinstance(buffer, memoryview):
+            buffer = buffer.tobytes()
         try:
             await self.write_message(buffer, True)
         except tornado.websocket.WebSocketClosedError:
@@ -354,9 +356,15 @@ class WebSocketTunnelServer(server.TunnelServer):
                 self._tunnel_chain.close()
                 self._tunnel_chain = None
 
-        path = self._listen_url.path.format(
-            addr=r"(?P<addr>[\w\.-]+)", port=r"(?P<port>\d+)"
-        )
+        try:
+            path = self._listen_url.path.format(
+                addr=r"(?P<addr>[\w\.-]+)", port=r"(?P<port>\d+)"
+            )
+        except (KeyError, ValueError):
+            raise ValueError(
+                "Invalid url: %s, please ensure `{addr}` and `{port}` is in the url"
+                % (self._listen_url.path)
+            )
         self._listen_url.path = path
 
         handlers = [
