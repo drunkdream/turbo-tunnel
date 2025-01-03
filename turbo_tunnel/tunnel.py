@@ -335,12 +335,13 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
             if not self._tunnel:
                 assert not self._buffer
                 raise tornado.iostream.StreamClosedError()
-            if self._read_event.is_set():
-                self._read_event.clear()
-            await self._read_event.wait()
-
+            if not self._buffer:
+                if self._read_event.is_set():
+                    self._read_event.clear()
+                await self._read_event.wait()
             if not self._buffer:
                 raise tornado.iostream.StreamClosedError()
+
             pos = self._buffer.find(delimiter)
             if pos >= 0:
                 buffer = self._buffer[: pos + len(delimiter)]
