@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-"""terminal plugin
-"""
+"""terminal plugin"""
 
 import asyncio
 import curses
@@ -11,7 +10,6 @@ import traceback
 
 from . import Plugin
 from .. import registry, utils, BANNER, VERSION
-
 
 curses_colors = {}
 
@@ -334,9 +332,11 @@ class TerminalTable(object):
             self.render_text(
                 header.title,
                 line,
-                header.start
-                if header.align == "left"
-                else (header.end - len(header.title)),
+                (
+                    header.start
+                    if header.align == "left"
+                    else (header.end - len(header.title))
+                ),
             )
 
     def render(self, data_table):
@@ -496,7 +496,11 @@ class TerminalPlugin(Plugin):
         self._term_tab = TerminalTable(
             "\x1b[36m%s \x1b[32mv%s\x1b[0m" % (BANNER.lstrip("\n").rstrip(), VERSION),
             [
-                {"title": "Source Address", "width": 18, "align": "left",},
+                {
+                    "title": "Source Address",
+                    "width": 18,
+                    "align": "left",
+                },
                 {"title": "Tunnel Address", "width": 24, "align": "left"},
                 {"title": "Target Address", "width": 32, "align": "left"},
                 {"title": "Start Time", "width": 20, "align": "left"},
@@ -593,11 +597,13 @@ class TerminalPlugin(Plugin):
             for conn in self._conn_list:
                 data = [
                     "%s:%d" % conn.client_address,
-                    ("%s:%d" % conn.tunnel_address)
-                    if conn.tunnel_address
-                    and conn.tunnel_address[0]
-                    and conn.tunnel_address[1]
-                    else "--",
+                    (
+                        ("%s:%d" % conn.tunnel_address)
+                        if conn.tunnel_address
+                        and conn.tunnel_address[0]
+                        and conn.tunnel_address[1]
+                        else "--"
+                    ),
                     "%s:%d" % conn.target_address,
                     conn.start_time,
                     conn.duration,
@@ -642,6 +648,3 @@ class TerminalPlugin(Plugin):
                 self._log_view.resize(self._log_view.width, log_view_height)
             self._term_tab.render(data_table)
             await asyncio.sleep(self.flush_internal)
-
-
-registry.plugin_registry.register(TerminalPlugin)
