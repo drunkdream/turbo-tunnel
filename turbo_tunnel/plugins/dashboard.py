@@ -34,10 +34,11 @@ class DashboardConnection:
         self._bytes_sent: int = 0
         self._bytes_received: int = 0
 
-        # Rate calculation using sliding window (5 seconds)
-        self._send_history: "deque[Tuple[int, float]]" = deque(maxlen=5)
-        self._recv_history: "deque[Tuple[int, float]]" = deque(maxlen=5)
+        # Rate calculation using 5-second sliding window
+        self._send_history: "deque[Tuple[int, float]]" = deque()  # (bytes, timestamp)
+        self._recv_history: "deque[Tuple[int, float]]" = deque()  # (bytes, timestamp)
         self._last_update: float = time.time()
+        self._rate_window: float = 5.0  # 5 seconds window for rate calculation
 
     @property
     def client_address(self) -> Tuple[str, int]:
@@ -106,16 +107,33 @@ class DashboardConnection:
 
     @property
     def send_rate(self) -> float:
-        """Calculate send rate in bytes/sec"""
+        """Calculate average send rate over the last 5 seconds (bytes/sec)"""
         try:
+            current_time = time.time()
+            cutoff_time = current_time - self._rate_window
+
+            # Remove old entries outside the 5-second window
+            while self._send_history and self._send_history[0][1] < cutoff_time:
+                self._send_history.popleft()
+
             if not self._send_history:
                 return 0.0
+
+            # Calculate total bytes in the window
             total_bytes = sum(b for b, _ in self._send_history)
-            if len(self._send_history) < 2:
-                return float(total_bytes) if total_bytes >= 0 else 0.0
-            time_span = self._send_history[-1][1] - self._send_history[0][1]
-            if time_span <= 0:
-                return 0.0
+
+            # Calculate time span
+            if len(self._send_history) == 1:
+                # Only one data point, use time since that point
+                time_span = current_time - self._send_history[0][1]
+                if time_span < 0.001:  # Less than 1ms, treat as instant
+                    return 0.0
+            else:
+                # Multiple data points, use first to last
+                time_span = self._send_history[-1][1] - self._send_history[0][1]
+                if time_span <= 0:
+                    return 0.0
+
             rate = total_bytes / time_span
             # Ensure the rate is a valid finite number
             return rate if (rate >= 0 and rate < float("inf")) else 0.0
@@ -124,16 +142,33 @@ class DashboardConnection:
 
     @property
     def recv_rate(self) -> float:
-        """Calculate receive rate in bytes/sec"""
+        """Calculate average receive rate over the last 5 seconds (bytes/sec)"""
         try:
+            current_time = time.time()
+            cutoff_time = current_time - self._rate_window
+
+            # Remove old entries outside the 5-second window
+            while self._recv_history and self._recv_history[0][1] < cutoff_time:
+                self._recv_history.popleft()
+
             if not self._recv_history:
                 return 0.0
+
+            # Calculate total bytes in the window
             total_bytes = sum(b for b, _ in self._recv_history)
-            if len(self._recv_history) < 2:
-                return float(total_bytes) if total_bytes >= 0 else 0.0
-            time_span = self._recv_history[-1][1] - self._recv_history[0][1]
-            if time_span <= 0:
-                return 0.0
+
+            # Calculate time span
+            if len(self._recv_history) == 1:
+                # Only one data point, use time since that point
+                time_span = current_time - self._recv_history[0][1]
+                if time_span < 0.001:  # Less than 1ms, treat as instant
+                    return 0.0
+            else:
+                # Multiple data points, use first to last
+                time_span = self._recv_history[-1][1] - self._recv_history[0][1]
+                if time_span <= 0:
+                    return 0.0
+
             rate = total_bytes / time_span
             # Ensure the rate is a valid finite number
             return rate if (rate >= 0 and rate < float("inf")) else 0.0
