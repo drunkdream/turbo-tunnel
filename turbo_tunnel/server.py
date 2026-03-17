@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
-'''Tunnel Server
-'''
+"""Tunnel Server"""
 
 import asyncio
 import socket
@@ -15,8 +14,8 @@ from . import utils
 
 
 class TunnelServer(object):
-    '''Tunnel Server
-    '''
+    """Tunnel Server"""
+
     retry_count = 0
 
     def __new__(cls, listen_url, tunnel_router_or_urls):
@@ -29,21 +28,19 @@ class TunnelServer(object):
             tunnel_urls = [utils.Url(url) for url in tunnel_router_or_urls]
         server_class = registry.server_registry[listen_url.protocol]
         if not server_class:
-            raise RuntimeError('%s tunnel server not registered' %
-                               listen_url.protocol.upper())
+            raise RuntimeError(
+                "%s tunnel server not registered" % listen_url.protocol.upper()
+            )
         for tunnel in tunnel_urls:
             if not registry.tunnel_registry[tunnel.protocol]:
-                raise RuntimeError('%s tunnel not registered' %
-                                   tunnel.protocol.upper())
+                raise RuntimeError("%s tunnel not registered" % tunnel.protocol.upper())
         instance = object.__new__(server_class)
         instance.__init__(listen_url, tunnel_router, tunnel_urls, True)
         return instance
 
-    def __init__(self,
-                 listen_url,
-                 tunnel_router=None,
-                 tunnel_urls=None,
-                 real_init=False):
+    def __init__(
+        self, listen_url, tunnel_router=None, tunnel_urls=None, real_init=False
+    ):
         if not real_init:
             return
         self._listen_url = listen_url
@@ -67,8 +64,9 @@ class TunnelServer(object):
         self._running = False
 
     def create_tunnel_chain(self):
-        return chain.TunnelChain(self._tunnel_router or self._tunnel_urls,
-                                 self.retry_count + 1)
+        return chain.TunnelChain(
+            self._tunnel_router or self._tunnel_urls, self.retry_count + 1
+        )
 
     async def forward_data_to_upstream(self, tun_conn, downstream, upstream):
         while self._running:
@@ -111,8 +109,8 @@ class TunnelServer(object):
 
 
 class TunnelConnection(object):
-    '''Tunnel Connection
-    '''
+    """Tunnel Connection"""
+
     def __init__(self, client_address, target_address, tunnel_address=None):
         self._client_address = client_address
         self._target_address = target_address
@@ -141,60 +139,93 @@ class TunnelConnection(object):
 
     def update_tunnel_address(self, tunnel_address):
         self._tunnel_address = tunnel_address
-        registry.plugin_registry.notify('tunnel_address_updated', self,
-                                        tunnel_address)
+        registry.plugin_registry.notify("tunnel_address_updated", self, tunnel_address)
 
     def on_open(self):
-        message = '[%s] New connection from %s:%d' % (self.__class__.__name__,
-                                                      self._client_address[0],
-                                                      self._client_address[1])
-        message += ', tunnel to %s:%d' % self._target_address
+        message = "[%s] New connection from %s:%d" % (
+            self.__class__.__name__,
+            self._client_address[0],
+            self._client_address[1],
+        )
+        message += ", tunnel to %s:%d" % self._target_address
         if self._tunnel_address:
-            message += ' through %s:%d' % self._tunnel_address
+            message += " through %s:%d" % self._tunnel_address
         utils.logger.info(message)
-        registry.plugin_registry.notify('new_connection', self)
+        registry.plugin_registry.notify("new_connection", self)
 
     def on_data_recevied(self, buffer):
         self._bytes_received += len(buffer)
-        utils.logger.debug('[%s][%s:%d][%s:%d] %d bytes received' %
-                           (self.__class__.__name__, self._client_address[0],
-                            self._client_address[1], self._target_address[0],
-                            self._target_address[1], len(buffer)))
-        registry.plugin_registry.notify('data_recevied', self, buffer)
+        utils.logger.debug(
+            "[%s][%s:%d][%s:%d] %d bytes received"
+            % (
+                self.__class__.__name__,
+                self._client_address[0],
+                self._client_address[1],
+                self._target_address[0],
+                self._target_address[1],
+                len(buffer),
+            )
+        )
+        registry.plugin_registry.notify("data_recevied", self, buffer)
 
     def on_data_sent(self, buffer):
         self._bytes_sent += len(buffer)
-        utils.logger.debug('[%s][%s:%d][%s:%d] %d bytes sent' %
-                           (self.__class__.__name__, self._client_address[0],
-                            self._client_address[1], self._target_address[0],
-                            self._target_address[1], len(buffer)))
-        registry.plugin_registry.notify('data_sent', self, buffer)
+        utils.logger.debug(
+            "[%s][%s:%d][%s:%d] %d bytes sent"
+            % (
+                self.__class__.__name__,
+                self._client_address[0],
+                self._client_address[1],
+                self._target_address[0],
+                self._target_address[1],
+                len(buffer),
+            )
+        )
+        registry.plugin_registry.notify("data_sent", self, buffer)
 
     def on_upstream_closed(self):
-        utils.logger.info('[%s][%s:%d][%s:%d] Upstream closed' %
-                          (self.__class__.__name__, self._client_address[0],
-                           self._client_address[1], self._target_address[0],
-                           self._target_address[1]))
+        utils.logger.info(
+            "[%s][%s:%d][%s:%d] Upstream closed"
+            % (
+                self.__class__.__name__,
+                self._client_address[0],
+                self._client_address[1],
+                self._target_address[0],
+                self._target_address[1],
+            )
+        )
 
     def on_downstream_closed(self):
-        utils.logger.info('[%s][%s:%d][%s:%d] Downstream closed' %
-                          (self.__class__.__name__, self._client_address[0],
-                           self._client_address[1], self._target_address[0],
-                           self._target_address[1]))
+        utils.logger.info(
+            "[%s][%s:%d][%s:%d] Downstream closed"
+            % (
+                self.__class__.__name__,
+                self._client_address[0],
+                self._client_address[1],
+                self._target_address[0],
+                self._target_address[1],
+            )
+        )
 
     def on_close(self):
         utils.logger.debug(
-            '[%s][%s:%d][%s:%d] Connection closed, total %d bytes sent, %d bytes received'
-            %
-            (self.__class__.__name__, self._client_address[0],
-             self._client_address[1], self._target_address[0],
-             self._target_address[1], self._bytes_sent, self._bytes_received))
-        registry.plugin_registry.notify('connection_closed', self)
+            "[%s][%s:%d][%s:%d] Connection closed, total %d bytes sent, %d bytes received"
+            % (
+                self.__class__.__name__,
+                self._client_address[0],
+                self._client_address[1],
+                self._target_address[0],
+                self._target_address[1],
+                self._bytes_sent,
+                self._bytes_received,
+            )
+        )
+        registry.plugin_registry.notify("connection_closed", self)
 
 
 class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
-    '''TCP Tunnel Server
-    '''
+    """TCP Tunnel Server"""
+
     def post_init(self):
         tornado.tcpserver.TCPServer.__init__(self)
 
@@ -209,35 +240,46 @@ class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
     async def handle_stream(self, stream, address):
         target_address = self._tunnel_urls[-1].host, self._tunnel_urls[-1].port
         downstream = tunnel.TCPTunnel(stream)
-        with TunnelConnection(address, target_address, self.final_tunnel
-                              and self.final_tunnel.address) as tun_conn:
+        with TunnelConnection(
+            address, target_address, self.final_tunnel and self.final_tunnel.address
+        ) as tun_conn:
             with self.create_tunnel_chain() as tunnel_chain:
                 try:
                     await tunnel_chain.create_tunnel(target_address)
                 except utils.TunnelError as e:
                     utils.logger.warn(
-                        '[%s] Connect %s:%d failed: %s' %
-                        (self.__class__.__name__, target_address[0],
-                         target_address[1], e))
+                        "[%s] Connect %s:%d failed: %s"
+                        % (
+                            self.__class__.__name__,
+                            target_address[0],
+                            target_address[1],
+                            e,
+                        )
+                    )
                     stream.close()
                     return
 
                 tasks = [
                     utils.AsyncTaskManager().wrap_task(
-                        self.forward_data_to_upstream(tun_conn, downstream,
-                                                      tunnel_chain.tail)),
+                        self.forward_data_to_upstream(
+                            tun_conn, downstream, tunnel_chain.tail
+                        )
+                    ),
                     utils.AsyncTaskManager().wrap_task(
                         self.forward_data_to_downstream(
-                            tun_conn, downstream, tunnel_chain.tail))
+                            tun_conn, downstream, tunnel_chain.tail
+                        )
+                    ),
                 ]
                 await utils.wait_for_tasks(tasks, return_when=asyncio.FIRST_COMPLETED)
                 downstream.close()
 
     def start(self):
         self.listen(self._listen_url.port, self._listen_url.host)
-        utils.logger.info('[%s] TCP server is listening on %s:%d' %
-                          (self.__class__.__name__, self._listen_url.host,
-                           self._listen_url.port))
+        utils.logger.info(
+            "[%s] TCP server is listening on %s:%d"
+            % (self.__class__.__name__, self._listen_url.host, self._listen_url.port)
+        )
 
 
-registry.server_registry.register('tcp', TCPTunnelServer)
+registry.server_registry.register("tcp", TCPTunnelServer)
