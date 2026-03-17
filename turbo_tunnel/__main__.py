@@ -1,21 +1,24 @@
 # -*- coding: utf-8 -*-
-"""
-"""
+""" """
 
 import argparse
 import asyncio
+import importlib
 import logging
 import logging.handlers
 import os
 import re
+import shlex
 import sys
 import traceback
+from typing import Any, Dict, List, Optional, Tuple
 
 import tornado.ioloop
 
 from . import BANNER
 from . import VERSION
 from . import conf
+from . import plugins
 from . import registry
 from . import route
 from . import server
@@ -45,12 +48,12 @@ class HighlightFormatter(logging.Formatter):
 
     bold_red = "\x1b[31;1m"
 
-    def __init__(self, format):
+    def __init__(self, format: str) -> None:
         super(HighlightFormatter, self).__init__(format)
-        self._format = format.replace(
+        self._format: str = format.replace(
             "%(asctime)s", self.grey + "%(asctime)s" + self.reset
         )
-        self.FORMATS = {
+        self.FORMATS: Dict[int, str] = {
             logging.DEBUG: self.cyan,
             logging.INFO: self.green,
             logging.WARNING: self.yellow,
@@ -58,10 +61,12 @@ class HighlightFormatter(logging.Formatter):
             logging.CRITICAL: self.bold_red,
         }
 
-    def format(self, record):
+    def format(
+        self, record: logging.LogRecord
+    ) -> str:  # pyright: ignore[reportImplicitOverride]
         log_fmt = self._format.replace(
             "%(levelname)s",
-            self.FORMATS.get(record.levelno) + "%(levelname)s" + self.reset,
+            self.FORMATS.get(record.levelno, "") + "%(levelname)s" + self.reset,
         )
         record.msg = re.sub(
             r"\[([\w\.-]+):(\d+)\]\[([\w\.-]+):(\d+)\]",
@@ -90,52 +95,124 @@ class HighlightFormatter(logging.Formatter):
         return formatter.format(record)
 
 
-def handle_args(args):
+def _load_plugin(module_path: str) -> Optional[type]:
+    """Load plugin class from module path.
 
-    if args.plugin:
-        registry.plugin_registry.enable()
-        for plugin in args.plugin:
-            for module in ("turbo_tunnel.plugins.%s" % plugin, plugin):
+    Args:
+        module_path: Module path to import (e.g., 'dashboard' or 'my.custom.plugin')
+
+    Returns:
+        Plugin class that inherits from Plugin base class, or None if not found
+    """
+    # Try to import from turbo_tunnel.plugins first, then as standalone module
+    for full_module_path in (f"turbo_tunnel.plugins.{module_path}", module_path):
+        try:
+            module = importlib.import_module(full_module_path)
+        except ImportError:
+            continue
+
+        # Iterate through all members of the module
+        for name in dir(module):
+            obj = getattr(module, name)
+            # Check if it's a class and inherits from Plugin (but not Plugin itself)
+            if (
+                isinstance(obj, type)
+                and issubclass(obj, plugins.Plugin)
+                and obj is not plugins.Plugin
+            ):
+                utils.logger.info(
+                    "[PluginLoader] Found plugin class: %s from module %s"
+                    % (obj.__name__, full_module_path)
+                )
+                return obj
+
+        # Module imported but no plugin class found
+        utils.logger.warning(
+            "[PluginLoader] No Plugin subclass found in module %s" % full_module_path
+        )
+        return None
+
+    # Module not found
+    return None
+
+
+def _parse_plugin_spec(plugin_spec: str) -> Tuple[str, Dict[str, Any]]:
+    """Parse plugin specification string.
+
+    Args:
+        plugin_spec: Plugin specification in format 'plugin_name [--arg1 value1 --arg2 value2]'
+                    Example: 'dashboard --port 8080 --host 0.0.0.0'
+
+    Returns:
+        Tuple of (plugin_name, kwargs_dict)
+    """
+    try:
+        # Use shlex to properly split the command line
+        parts: List[str] = shlex.split(plugin_spec)
+    except ValueError as e:
+        utils.logger.error(
+            "[PluginLoader] Failed to parse plugin spec '%s': %s" % (plugin_spec, e)
+        )
+        return plugin_spec, {}
+
+    if not parts:
+        return "", {}
+
+    plugin_name: str = parts[0]
+    kwargs: Dict[str, Any] = {}
+
+    # Parse arguments
+    i: int = 1
+    while i < len(parts):
+        arg = parts[i]
+        if arg.startswith("--"):
+            key: str = arg[2:]  # Remove '--' prefix
+            if i + 1 < len(parts) and not parts[i + 1].startswith("--"):
+                value: str = parts[i + 1]
+                # Try to convert to appropriate type
                 try:
-                    __import__(module)
-                except ImportError:
-                    pass
-                else:
-                    break
+                    # Try int first
+                    kwargs[key] = int(value)
+                except ValueError:
+                    try:
+                        # Try float
+                        kwargs[key] = float(value)
+                    except ValueError:
+                        # Keep as string
+                        if value.lower() in ("true", "false"):
+                            kwargs[key] = value.lower() == "true"
+                        else:
+                            kwargs[key] = value
+                i += 2
             else:
-                utils.logger.error("Load plugin %s failed" % plugin)
+                # Flag without value, treat as True
+                kwargs[key] = True
+                i += 1
+        else:
+            i += 1
 
-    tunnel_servers = []
-    if args.config:
-        if not os.path.exists(args.config):
-            print("Config file %s not exist" % args.config, file=sys.stderr)
-            return -1
-        config = conf.TunnelConfiguration(args.config, auto_reload=args.auto_reload)
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(config.load())
-        router = route.TunnelRouter(config)
-        for listen_url in config.listen_urls:
-            tunnel_server = server.TunnelServer(listen_url, router)
-            tunnel_servers.append(tunnel_server)
-    elif args.listen:
-        tunnel = args.tunnel
-        if not tunnel:
-            tunnel = ["tcp://"]
-        tunnel_server = server.TunnelServer(args.listen, tunnel)
-        tunnel_servers.append(tunnel_server)
-    else:
-        print("Argument --listen not specified", file=sys.stderr)
-        return -1
+    return plugin_name, kwargs
 
-    log_file = None
+
+def handle_args(args: argparse.Namespace) -> Optional[int]:
+    """Handle command line arguments
+
+    Args:
+        args: Parsed command line arguments
+
+    Returns:
+        Exit code or None if successful
+    """
+    log_file: Optional[str] = None
     if args.log_file:
         log_file = os.path.abspath(args.log_file)
 
-    handler = logging.StreamHandler(sys.stdout)
-    fmt = "[%(asctime)s][%(levelname)s]%(message)s"
-    enable_color_output = not args.no_color
+    handler: logging.StreamHandler[Any] = logging.StreamHandler(sys.stdout)
+    fmt: str = "[%(asctime)s][%(levelname)s]%(message)s"
+    enable_color_output: bool = not args.no_color
     if enable_color_output and sys.platform == "win32":
         enable_color_output = utils.enable_native_ansi()
+    formatter: logging.Formatter
     if not enable_color_output:
         formatter = logging.Formatter(fmt)
     else:
@@ -153,18 +230,56 @@ def handle_args(args):
     elif args.log_level == "error":
         utils.logger.setLevel(logging.ERROR)
 
-    utils.logger.propagate = 0
+    utils.logger.propagate = False
     utils.logger.addHandler(handler)
 
     if log_file:
-        handler = logging.handlers.RotatingFileHandler(
-            log_file, maxBytes=10 * 1024 * 1024, backupCount=4
+        file_handler: logging.handlers.RotatingFileHandler = (
+            logging.handlers.RotatingFileHandler(
+                log_file, maxBytes=10 * 1024 * 1024, backupCount=4
+            )
         )
-        formatter = logging.Formatter(
+        file_formatter: logging.Formatter = logging.Formatter(
             "[%(asctime)s][%(levelname)s][%(filename)s][%(lineno)d]%(message)s"
         )
-        handler.setFormatter(formatter)
-        utils.logger.addHandler(handler)
+        file_handler.setFormatter(file_formatter)
+        utils.logger.addHandler(file_handler)
+
+    if args.plugin:
+        registry.plugin_registry.enable()
+        for plugin_spec in args.plugin:
+            plugin_name, plugin_kwargs = _parse_plugin_spec(plugin_spec)
+            plugin_cls = _load_plugin(plugin_name)
+            if plugin_cls:
+                if plugin_kwargs:
+                    # Register plugin with parsed arguments
+                    registry.plugin_registry.register_with_args(plugin_cls, plugin_kwargs)
+                else:
+                    registry.plugin_registry.register(plugin_cls)
+            else:
+                utils.logger.error("[PluginLoader] Load plugin %s failed" % plugin_name)
+
+    tunnel_servers: list[server.TunnelServer] = []
+    if args.config:
+        if not os.path.exists(args.config):
+            print("Config file %s not exist" % args.config, file=sys.stderr)
+            return -1
+        config: conf.TunnelConfiguration = conf.TunnelConfiguration(
+            args.config, auto_reload=args.auto_reload
+        )
+        loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
+        loop.run_until_complete(config.load())
+        router: route.TunnelRouter = route.TunnelRouter(config)
+        for listen_url in config.listen_urls:
+            tunnel_server: server.TunnelServer = server.TunnelServer(listen_url, router)
+            tunnel_servers.append(tunnel_server)
+    elif args.listen:
+        tunnel_list: List[str] = args.tunnel if args.tunnel else ["tcp://"]
+        tunnel_server = server.TunnelServer(args.listen, tunnel_list)  # type: ignore[arg-type]
+        tunnel_servers.append(tunnel_server)
+    else:
+        print("Argument --listen not specified", file=sys.stderr)
+        return -1
 
     if args.retry:
         server.TunnelServer.retry_count = args.retry
@@ -177,10 +292,17 @@ def handle_args(args):
     for tunnel_server in tunnel_servers:
         tunnel_server.start()
 
+    return None
 
-def main():
+
+def main() -> int:
+    """Main entry point for TurboTunnel.
+
+    Returns:
+        Exit code (0 for success, non-zero for error)
+    """
     print("\x1b[0;36m%s \x1b[0;32m v%s\x1b[0m\n" % (BANNER.rstrip(), VERSION))
-    parser = argparse.ArgumentParser(
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
         prog="turbo-tunnel", description="TurboTunnel cmdline tool v%s" % VERSION
     )
     parser.add_argument("-c", "--config", help="config yaml file path")
@@ -221,12 +343,12 @@ def main():
         default=False,
     )
 
-    args = sys.argv[1:]
-    if not args:
+    raw_args: list[str] = sys.argv[1:]
+    if not raw_args:
         parser.print_help()
         return 0
 
-    args = parser.parse_args(args)
+    args: argparse.Namespace = parser.parse_args(raw_args)
 
     if args.version:
         print("v%s" % VERSION)
@@ -241,13 +363,23 @@ def main():
         utils.win32_daemon()
         return 0
 
-    handle_args(args)
+    result: Optional[int] = handle_args(args)
+    if result is not None:
+        return result
 
-    def handle_exception(loop, context):
+    def handle_exception(
+        loop: asyncio.AbstractEventLoop, context: Dict[str, Any]
+    ) -> None:
+        """Handle exceptions in the event loop.
+
+        Args:
+            loop: The event loop
+            context: Exception context dictionary
+        """
         registry.plugin_registry.notify("unload")
         print("Exception caught:\n", file=sys.stderr)
-        message = context["message"]
-        exp = context.get("exception")
+        message: str = context["message"]
+        exp: Optional[BaseException] = context.get("exception")
         if exp:
             message = "".join(
                 traceback.format_exception(
@@ -258,17 +390,19 @@ def main():
         if args.stop_on_error:
             loop.stop()
 
-    loop = asyncio.get_event_loop()
+    loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
     loop.set_exception_handler(handle_exception)
 
     try:
         tornado.ioloop.IOLoop.current().start()
     except KeyboardInterrupt:
         registry.plugin_registry.notify("unload")
-        tasks = utils.AsyncTaskManager().running_tasks
+        tasks: list[asyncio.Task[Any]] = utils.AsyncTaskManager().running_tasks
         for task in tasks:
             print("Task %s can't auto exit" % task, file=sys.stderr)
         print("Process exit warmly.")
+
+    return 0
 
 
 if __name__ == "__main__":
