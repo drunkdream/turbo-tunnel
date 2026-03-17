@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
 """Tunnel Route"""
 
-from typing import List, Literal, Optional, Tuple, Union
+import sys
+from typing import List, Optional, Tuple, Union
+
+if sys.version_info >= (3, 8):
+    from typing import Literal
+else:
+    from typing_extensions import Literal
 
 from . import conf
 from . import utils
