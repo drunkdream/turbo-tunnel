@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 
-"""Turbo tunnel
-"""
+"""Turbo tunnel"""
 
-VERSION = "0.18.5"
+VERSION = "0.19.0"
 BANNER = r"""
  _____            _          _____                        _
 /__   \_   _ _ __| |__   ___/__   \_   _ _ __  _ __   ___| |
