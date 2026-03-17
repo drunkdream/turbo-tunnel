@@ -2,9 +2,10 @@
 """Tunnel Server"""
 
 import asyncio
-import socket
+from typing import List, Optional, Tuple, Type, Union
 
 import tornado.tcpserver
+import tornado.iostream
 
 from . import chain
 from . import registry
@@ -16,62 +17,84 @@ from . import utils
 class TunnelServer(object):
     """Tunnel Server"""
 
-    retry_count = 0
+    retry_count: int = 0
 
-    def __new__(cls, listen_url, tunnel_router_or_urls):
-        listen_url = utils.Url(listen_url)
-        tunnel_router = None
-        tunnel_urls = []
+    def __new__(
+        cls,
+        listen_url: Union[str, utils.Url],
+        tunnel_router_or_urls: Union[route.TunnelRouter, List[Union[str, utils.Url]]],
+    ) -> "TunnelServer":
+        listen_url = (
+            utils.Url(listen_url) if isinstance(listen_url, str) else listen_url
+        )
+        tunnel_router: Optional[route.TunnelRouter] = None
+        tunnel_urls: List[utils.Url] = []
         if isinstance(tunnel_router_or_urls, route.TunnelRouter):
             tunnel_router = tunnel_router_or_urls
         else:
-            tunnel_urls = [utils.Url(url) for url in tunnel_router_or_urls]
-        server_class = registry.server_registry[listen_url.protocol]
+            tunnel_urls = [
+                utils.Url(url) if isinstance(url, str) else url
+                for url in tunnel_router_or_urls
+            ]
+        server_class: Optional[Type["TunnelServer"]] = registry.server_registry[
+            listen_url.protocol
+        ]
         if not server_class:
             raise RuntimeError(
                 "%s tunnel server not registered" % listen_url.protocol.upper()
             )
-        for tunnel in tunnel_urls:
-            if not registry.tunnel_registry[tunnel.protocol]:
-                raise RuntimeError("%s tunnel not registered" % tunnel.protocol.upper())
+        for tun in tunnel_urls:
+            if not registry.tunnel_registry[tun.protocol]:
+                raise RuntimeError("%s tunnel not registered" % tun.protocol.upper())
         instance = object.__new__(server_class)
         instance.__init__(listen_url, tunnel_router, tunnel_urls, True)
         return instance
 
     def __init__(
-        self, listen_url, tunnel_router=None, tunnel_urls=None, real_init=False
-    ):
+        self,
+        listen_url: utils.Url,
+        tunnel_router: Optional[route.TunnelRouter] = None,
+        tunnel_urls: Optional[List[utils.Url]] = None,
+        real_init: bool = False,
+    ) -> None:
         if not real_init:
             return
-        self._listen_url = listen_url
-        self._tunnel_router = tunnel_router
-        self._tunnel_urls = tunnel_urls
-        self._running = True
+        self._listen_url: utils.Url = listen_url
+        self._tunnel_router: Optional[route.TunnelRouter] = tunnel_router
+        self._tunnel_urls: Optional[List[utils.Url]] = tunnel_urls
+        self._running: bool = True
         self.post_init()
 
     @property
-    def final_tunnel(self):
-        for tunnel_url in self._tunnel_urls[::-1]:
-            if not tunnel_url.host or not tunnel_url.port:
-                continue
-            return tunnel_url
+    def final_tunnel(self) -> Optional[utils.Url]:
+        if self._tunnel_urls:
+            for tunnel_url in self._tunnel_urls[::-1]:
+                if not tunnel_url.host or not tunnel_url.port:
+                    continue
+                return tunnel_url
+
         return None
 
-    def post_init(self):
+    def post_init(self) -> None:
         pass
 
-    def close(self):
+    def close(self) -> None:
         self._running = False
 
-    def create_tunnel_chain(self):
+    def create_tunnel_chain(self) -> chain.TunnelChain:
         return chain.TunnelChain(
             self._tunnel_router or self._tunnel_urls, self.retry_count + 1
         )
 
-    async def forward_data_to_upstream(self, tun_conn, downstream, upstream):
+    async def forward_data_to_upstream(
+        self,
+        tun_conn: "TunnelConnection",
+        downstream: utils.IStream,
+        upstream: utils.IStream,
+    ) -> None:
         while self._running:
             try:
-                buffer = await downstream.read()
+                buffer: bytes = await downstream.read()
             except utils.TunnelClosedError:
                 tun_conn.on_downstream_closed()
                 upstream.close()
@@ -86,10 +109,15 @@ class TunnelServer(object):
             else:
                 tun_conn.on_data_sent(buffer)
 
-    async def forward_data_to_downstream(self, tun_conn, downstream, upstream):
+    async def forward_data_to_downstream(
+        self,
+        tun_conn: "TunnelConnection",
+        downstream: utils.IStream,
+        upstream: utils.IStream,
+    ) -> None:
         while self._running:
             try:
-                buffer = await upstream.read()
+                buffer: bytes = await upstream.read()
             except utils.TunnelClosedError:
                 tun_conn.on_upstream_closed()
                 downstream.close()
@@ -104,44 +132,68 @@ class TunnelServer(object):
                 upstream.close()
                 break
 
-    def start(self):
+    def start(self) -> None:
         raise NotImplementedError
 
 
 class TunnelConnection(object):
     """Tunnel Connection"""
 
-    def __init__(self, client_address, target_address, tunnel_address=None):
-        self._client_address = client_address
-        self._target_address = target_address
-        self._tunnel_address = tunnel_address
-        self._bytes_sent = 0
-        self._bytes_received = 0
+    def __init__(
+        self,
+        client_address: Tuple[str, int],
+        target_address: Tuple[str, int],
+        tunnel_address: Optional[Tuple[str, int]] = None,
+    ) -> None:
+        self._client_address: Tuple[str, int] = client_address
+        self._target_address: Tuple[str, int] = target_address
+        self._tunnel_address: Optional[Tuple[str, int]] = tunnel_address
+        self._bytes_sent: int = 0
+        self._bytes_received: int = 0
 
-    def __enter__(self):
+    def __str__(self) -> str:  # pyright: ignore[reportImplicitOverride]
+        tunnel_address = "Direct"
+        if self._tunnel_address:
+            tunnel_address = "%s:%d" % self._tunnel_address
+        return "<%s object at 0x%x %s:%d -> %s -> %s:%d>" % (
+            self.__class__.__name__,
+            id(self),
+            self._client_address[0],
+            self._client_address[1],
+            tunnel_address,
+            self._target_address[0],
+            self._target_address[1],
+        )
+
+    def __enter__(self) -> "TunnelConnection":
         self.on_open()
         return self
 
-    def __exit__(self, exc_type, exc_value, exc_trackback):
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        exc_trackback: Optional[object],
+    ) -> None:
         self.on_close()
 
     @property
-    def client_address(self):
+    def client_address(self) -> Tuple[str, int]:
         return self._client_address
 
     @property
-    def target_address(self):
+    def target_address(self) -> Tuple[str, int]:
         return self._target_address
 
     @property
-    def tunnel_address(self):
+    def tunnel_address(self) -> Optional[Tuple[str, int]]:
         return self._tunnel_address
 
-    def update_tunnel_address(self, tunnel_address):
+    def update_tunnel_address(self, tunnel_address: Tuple[str, int]) -> None:
         self._tunnel_address = tunnel_address
         registry.plugin_registry.notify("tunnel_address_updated", self, tunnel_address)
 
-    def on_open(self):
+    def on_open(self) -> None:
         message = "[%s] New connection from %s:%d" % (
             self.__class__.__name__,
             self._client_address[0],
@@ -153,7 +205,7 @@ class TunnelConnection(object):
         utils.logger.info(message)
         registry.plugin_registry.notify("new_connection", self)
 
-    def on_data_recevied(self, buffer):
+    def on_data_recevied(self, buffer: bytes) -> None:
         self._bytes_received += len(buffer)
         utils.logger.debug(
             "[%s][%s:%d][%s:%d] %d bytes received"
@@ -168,7 +220,7 @@ class TunnelConnection(object):
         )
         registry.plugin_registry.notify("data_recevied", self, buffer)
 
-    def on_data_sent(self, buffer):
+    def on_data_sent(self, buffer: bytes) -> None:
         self._bytes_sent += len(buffer)
         utils.logger.debug(
             "[%s][%s:%d][%s:%d] %d bytes sent"
@@ -183,7 +235,7 @@ class TunnelConnection(object):
         )
         registry.plugin_registry.notify("data_sent", self, buffer)
 
-    def on_upstream_closed(self):
+    def on_upstream_closed(self) -> None:
         utils.logger.info(
             "[%s][%s:%d][%s:%d] Upstream closed"
             % (
@@ -195,7 +247,7 @@ class TunnelConnection(object):
             )
         )
 
-    def on_downstream_closed(self):
+    def on_downstream_closed(self) -> None:
         utils.logger.info(
             "[%s][%s:%d][%s:%d] Downstream closed"
             % (
@@ -207,7 +259,7 @@ class TunnelConnection(object):
             )
         )
 
-    def on_close(self):
+    def on_close(self) -> None:
         utils.logger.debug(
             "[%s][%s:%d][%s:%d] Connection closed, total %d bytes sent, %d bytes received"
             % (
@@ -223,26 +275,47 @@ class TunnelConnection(object):
         registry.plugin_registry.notify("connection_closed", self)
 
 
-class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
+class TCPTunnelServer(
+    TunnelServer, tornado.tcpserver.TCPServer
+):  # pyright: ignore[reportUnsafeMultipleInheritance]
     """TCP Tunnel Server"""
 
-    def post_init(self):
+    def post_init(self) -> None:  # pyright: ignore[reportImplicitOverride]
         tornado.tcpserver.TCPServer.__init__(self)
 
     @property
-    def final_tunnel(self):
-        for tunnel_url in self._tunnel_urls[:-1][::-1]:
-            if not tunnel_url.host or not tunnel_url.port:
-                continue
-            return tunnel_url
+    def final_tunnel(
+        self,
+    ) -> Optional[utils.Url]:  # pyright: ignore[reportImplicitOverride]
+        if self._tunnel_urls:
+            for tunnel_url in self._tunnel_urls[:-1][::-1]:
+                if not tunnel_url.host or not tunnel_url.port:
+                    continue
+                return tunnel_url
         return None
 
-    async def handle_stream(self, stream, address):
-        target_address = self._tunnel_urls[-1].host, self._tunnel_urls[-1].port
+    async def handle_stream(  # pyright: ignore[reportImplicitOverride]
+        self, stream: tornado.iostream.IOStream, address: Tuple[str, int]
+    ) -> None:
+        if not self._tunnel_urls:
+            stream.close()
+            return
+
+        last_tunnel = self._tunnel_urls[-1]
+        if not last_tunnel.host or not last_tunnel.port:
+            stream.close()
+            return
+
+        target_address: Tuple[str, int] = (last_tunnel.host, last_tunnel.port)
         downstream = tunnel.TCPTunnel(stream)
-        with TunnelConnection(
-            address, target_address, self.final_tunnel and self.final_tunnel.address
-        ) as tun_conn:
+
+        # Get tunnel address safely
+        final_tun = self.final_tunnel
+        tunnel_addr: Optional[Tuple[str, int]] = None
+        if final_tun and final_tun.host and final_tun.port:
+            tunnel_addr = (final_tun.host, final_tun.port)
+
+        with TunnelConnection(address, target_address, tunnel_addr) as tun_conn:
             with self.create_tunnel_chain() as tunnel_chain:
                 try:
                     await tunnel_chain.create_tunnel(target_address)
@@ -259,6 +332,10 @@ class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
                     stream.close()
                     return
 
+                if not tunnel_chain.tail:
+                    stream.close()
+                    return
+
                 tasks = [
                     utils.AsyncTaskManager().wrap_task(
                         self.forward_data_to_upstream(
@@ -271,14 +348,21 @@ class TCPTunnelServer(TunnelServer, tornado.tcpserver.TCPServer):
                         )
                     ),
                 ]
-                await utils.wait_for_tasks(tasks, return_when=asyncio.FIRST_COMPLETED)
+                _ = await utils.wait_for_tasks(
+                    tasks, return_when=asyncio.FIRST_COMPLETED
+                )
                 downstream.close()
 
-    def start(self):
-        self.listen(self._listen_url.port, self._listen_url.host)
+    def start(self) -> None:
+        """Start TCP server - implements TunnelServer.start()"""
+        self.listen(self._listen_url.port or 0, self._listen_url.host)
         utils.logger.info(
             "[%s] TCP server is listening on %s:%d"
-            % (self.__class__.__name__, self._listen_url.host, self._listen_url.port)
+            % (
+                self.__class__.__name__,
+                self._listen_url.host,
+                self._listen_url.port or 0,
+            )
         )
 
 
