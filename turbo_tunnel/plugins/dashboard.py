@@ -13,7 +13,7 @@ import tornado.websocket
 import tornado.httpserver
 
 from . import Plugin
-from .. import registry, utils
+from .. import utils
 from .. import server
 
 
@@ -274,14 +274,59 @@ class DashboardWebSocketHandler(tornado.websocket.WebSocketHandler):
     def on_message(
         self, message: Union[str, bytes]
     ) -> None:  # pyright: ignore[reportImplicitOverride]
-        """Receive message from client (reserved for future commands)"""
+        """Receive message from client and handle configuration updates"""
         try:
             if isinstance(message, bytes):
                 message = message.decode("utf-8")
             data = json.loads(message)
-            utils.logger.debug(
-                "[%s] Received message: %s" % (self.__class__.__name__, data)
-            )
+
+            # Handle configuration update
+            if data.get("type") == "config_update":
+                config_type = data.get("config")
+                value = data.get("value")
+
+                if config_type == "cleanup_interval":
+                    # Access plugin instance through class variable (set in on_load)
+                    if (
+                        hasattr(DashboardPlugin, "_instance")
+                        and DashboardPlugin._instance
+                    ):
+                        try:
+                            interval = int(value)
+                            if interval < 0:
+                                raise ValueError("Interval must be non-negative")
+                            DashboardPlugin._instance._cleanup_interval = interval
+                            utils.logger.info(
+                                "[%s] Updated cleanup interval to %d seconds"
+                                % (self.__class__.__name__, interval)
+                            )
+                            # Send confirmation
+                            self.write_message(
+                                json.dumps(
+                                    {
+                                        "type": "config_updated",
+                                        "config": "cleanup_interval",
+                                        "value": interval,
+                                    }
+                                )
+                            )
+                        except (ValueError, TypeError) as e:
+                            utils.logger.warning(
+                                "[%s] Invalid cleanup interval value: %s"
+                                % (self.__class__.__name__, e)
+                            )
+                            self.write_message(
+                                json.dumps(
+                                    {
+                                        "type": "error",
+                                        "message": f"Invalid interval value: {e}",
+                                    }
+                                )
+                            )
+            else:
+                utils.logger.debug(
+                    "[%s] Received message: %s" % (self.__class__.__name__, data)
+                )
         except json.JSONDecodeError:
             utils.logger.warning(
                 "[%s] Invalid JSON message: %s" % (self.__class__.__name__, message)
@@ -320,6 +365,9 @@ class StaticFileHandler(tornado.web.StaticFileHandler):
 class DashboardPlugin(Plugin):
     """Dashboard plugin for web-based monitoring"""
 
+    # Class variable to store the plugin instance for WebSocket access
+    _instance: "Optional[DashboardPlugin]" = None
+
     def __init__(self, host: str = "0.0.0.0", port: int = 8888) -> None:
         """Initialize dashboard plugin
 
@@ -340,8 +388,11 @@ class DashboardPlugin(Plugin):
         self._total_bytes_recv: int = 0
 
         # Auto cleanup configuration
-        self._cleanup_interval: int = 300  # 5 minutes
+        self._cleanup_interval: int = 3600  # 1 hour (default)
         self._max_connections: int = 100  # Keep at most 100 connections
+
+        # Store instance for WebSocket access
+        DashboardPlugin._instance = self
 
     def on_load(self) -> None:  # pyright: ignore[reportImplicitOverride]
         """Plugin loaded, start HTTP server"""
@@ -525,6 +576,10 @@ class DashboardPlugin(Plugin):
                 "active_connections": active_count,
                 "total_bytes_sent": self._total_bytes_sent,
                 "total_bytes_recv": self._total_bytes_recv,
+            },
+            "config": {
+                "cleanup_interval": self._cleanup_interval,
+                "max_connections": self._max_connections,
             },
         }
 
