@@ -29,11 +29,11 @@ jobs:
       - name: Install Dependencies
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo python -m pip install --upgrade pip pytest pytest-cov pytest-asyncio codecov
+            sudo python -m pip install --upgrade pip pytest pytest-cov pytest-asyncio pytest-timeout codecov
             sudo python -m pip install -r requirements.txt
             sudo python -m pip list
           else
-            python -m pip install --upgrade pip pytest pytest-cov pytest-asyncio codecov
+            python -m pip install --upgrade pip pytest pytest-cov pytest-asyncio pytest-timeout codecov
             python -m pip install -r requirements.txt
           fi
         shell: bash

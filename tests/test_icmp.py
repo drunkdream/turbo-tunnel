@@ -4,6 +4,8 @@ import asyncio
 import os
 import sys
 
+import pytest
+
 from turbo_tunnel import icmp
 from turbo_tunnel import utils
 
@@ -25,24 +27,13 @@ def exec_command(cmdline, sync=True, raise_for_error=True):
     return stdout
 
 
-def root_required(func):
-    if sys.platform != "linux":
-        print("Unsupported system %s" % sys.platform, file=sys.stderr)
-        return
-    if os.getuid() != 0:
-        print(
-            "Ignore run function %s when run as user %d" % (func.__name__, os.getuid()),
-            file=sys.stderr,
-        )
-        return
-    return func
+# Check if we should skip root-required tests
+skip_root_tests = sys.platform != "linux" or os.getuid() != 0
+skip_reason = "Requires Linux and root privileges (sudo)"
 
 
-@root_required
+@pytest.mark.skipif(skip_root_tests, reason=skip_reason)
 def setup_module(module):
-    if sys.platform != "linux":
-        print("Ignore module setup")
-        return
     with open(disable_ping_file, "w") as fp:
         fp.write("1")
 
@@ -59,19 +50,15 @@ def setup_module(module):
     print(exec_command("ip addr add 192.168.100.1/24 dev veth1"))
 
 
-@root_required
+@pytest.mark.skipif(skip_root_tests, reason=skip_reason)
 def teardown_module(module):
-    if sys.platform != "linux":
-        print("Ignore module teardown")
-        return
-
     with open(disable_ping_file, "w") as fp:
         fp.write("0")
     print(exec_command("ip link delete veth1"))
     print(exec_command("ip netns delete netns1"))
 
 
-@root_required
+@pytest.mark.skipif(skip_root_tests, reason=skip_reason)
 async def test_icmp_socket():
     address = "127.0.0.1"
     server_sock = icmp.AsyncICMPSocket()
@@ -86,7 +73,7 @@ async def test_icmp_socket():
     assert icmp_packet.data == buffer * 2
 
 
-@root_required
+@pytest.mark.skipif(skip_root_tests, reason=skip_reason)
 async def test_icmp_tunnel():
     event = asyncio.Event()
 
