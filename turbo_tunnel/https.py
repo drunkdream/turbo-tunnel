@@ -1,15 +1,17 @@
 # -*- coding: utf-8 -*-
-"""HTTPS Tunnel
-"""
+"""HTTPS Tunnel"""
 
-import asyncio
 import re
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import tornado.httpserver
+import tornado.httpclient
 import tornado.iostream
+import tornado.routing
+import tornado.simple_httpclient
 import tornado.web
 
 from . import auth
-from . import chain
 from . import registry
 from . import server
 from . import tunnel
@@ -20,19 +22,31 @@ class HTTPSTunnel(tunnel.TCPTunnel):
     """HTTPS Tunnel"""
 
     @property
-    def socket(self):
-        return self._tunnel.socket
+    def socket(self) -> Any:
+        if self._tunnel:
+            return self._tunnel.socket
+        return None
 
     @property
-    def stream(self):
-        return self._tunnel.stream
+    def stream(self) -> Any:
+        if self._tunnel:
+            return self._tunnel.stream
+        return None
 
-    async def connect(self):
-        data = "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\nProxy-Connection: Keep-Alive\r\n" % (
-            self._addr,
-            self._port,
-            self._addr,
-            self._port,
+    async def connect(self) -> bool:
+        if not self._tunnel:
+            return False
+
+        # Type narrowing: after the check above, _tunnel is not None
+        tunnel = self._tunnel
+        data = (
+            "CONNECT %s:%d HTTP/1.1\r\nHost: %s:%d\r\nProxy-Connection: Keep-Alive\r\n"
+            % (
+                self._addr,
+                self._port,
+                self._addr,
+                self._port,
+            )
         )
         auth_data = self._url.auth
         if auth_data:
@@ -40,26 +54,26 @@ class HTTPSTunnel(tunnel.TCPTunnel):
                 *auth_data.split(":")
             )
         data += "\r\n"
-        await self._tunnel.write(data.encode())
+        await tunnel.write(data.encode())
         buffer = bytearray()
         while True:
-            buffer += await self._tunnel.read()
+            buffer += await tunnel.read()
             if buffer.endswith(b"\r\n\r\n"):
                 break
 
-        lines = buffer.strip().split(b"\r\n")
-        items = lines[0].split()
-        code = int(items[1])
-        reason = (b" ".join(items[2:])).decode()
+        lines: List[bytes] = buffer.strip().split(b"\r\n")
+        items: List[bytes] = lines[0].split()
+        code: int = int(items[1])
+        reason: str = (b" ".join(items[2:])).decode()
         if code == 200:
             return True
-        utils.logger.warn(
+        utils.logger.warning(
             "[%s] Connect %s:%d over %s failed: [%d] %s"
             % (self.__class__.__name__, self._addr, self._port, self._url, code, reason)
         )
         return False
 
-    def close(self):
+    def close(self) -> None:
         if self._tunnel:
             self._tunnel.close()
             self._tunnel = None
@@ -72,12 +86,19 @@ class DefaultHandler(tornado.web.RequestHandler):
 class HTTPRouter(tornado.routing.Router):
     """Support CONNECT method"""
 
-    def __init__(self, app, handlers=None):
-        self._app = app
-        self._handlers = handlers or []
+    def __init__(
+        self,
+        app: tornado.web.Application,
+        handlers: Optional[List[Tuple[List[str], str, type]]] = None,
+    ) -> None:
+        super().__init__()
+        self._app: tornado.web.Application = app
+        self._handlers: List[Tuple[List[str], str, type]] = handlers or []
 
-    def find_handler(self, request, **kwargs):
-        handler = DefaultHandler
+    def find_handler(
+        self, request: Any, **kwargs: Any  # tornado.httputil.HTTPServerRequest
+    ) -> Any:  # tornado.httputil.HTTPMessageDelegate
+        handler: type = DefaultHandler
         if request.method == "CONNECT":
             for methods, _, _handler in self._handlers:
                 if "CONNECT" in methods:
@@ -100,23 +121,25 @@ class HTTPRouter(tornado.routing.Router):
 class HTTPSTunnelServer(server.TunnelServer):
     """HTTPS Tunnel Server"""
 
-    def post_init(self):
+    _tunnels: Dict[Tuple[str, int], List[Dict[str, Any]]]
+    _http_server: tornado.httpserver.HTTPServer
+
+    def post_init(self) -> None:
         this = self
         self._tunnels = {}
 
         class EnumHTTPTunnelStatus(object):
-
-            IDLE = 1
-            BUSY = 2
+            IDLE: int = 1
+            BUSY: int = 2
 
         class HTTPServerHandler(tornado.web.RequestHandler):
             """HTTP Server Handler"""
 
-            SUPPORTED_METHODS = list(tornado.web.RequestHandler.SUPPORTED_METHODS) + [
-                "CONNECT"
-            ]
+            SUPPORTED_METHODS: List[str] = list(
+                tornado.web.RequestHandler.SUPPORTED_METHODS
+            ) + ["CONNECT"]
 
-            async def _get_tunnel(self, address):
+            async def _get_tunnel(self, address: Tuple[str, int]) -> Dict[str, Any]:
                 if address not in this._tunnels:
                     this._tunnels[address] = []
                 force_instance = False
@@ -161,24 +184,29 @@ class HTTPSTunnelServer(server.TunnelServer):
                 this._tunnels[address].append(tunn)
                 return tunn
 
-            async def handle_request(self):
-                s_url = self.request.path
+            async def handle_request(self) -> None:
+                s_url: str = self.request.path
                 if self.request.query:
                     s_url += "?" + self.request.query
                 utils.logger.debug(
                     "[%s][%s] %s"
-                    % (self.__class__.__name__, self.request.method.upper(), s_url)
+                    % (
+                        self.__class__.__name__,
+                        (self.request.method or "").upper(),
+                        s_url,
+                    )
                 )
                 url = utils.Url(s_url)
-                if url.protocol != "http" or not url.host:
+                if url.protocol != "http" or not url.host or not url.port:
                     self.set_status(400)
                     return
 
+                url_address: Tuple[str, int] = (url.host, url.port)
                 try:
-                    tunn = await self._get_tunnel(url.address)
+                    tunn = await self._get_tunnel(url_address)
                 except utils.TunnelError as e:
                     if not isinstance(e, utils.TunnelBlockedError):
-                        utils.logger.warn(
+                        utils.logger.warning(
                             "[%s] Connect %s:%d failed: %s"
                             % (
                                 self.__class__.__name__,
@@ -195,7 +223,9 @@ class HTTPSTunnelServer(server.TunnelServer):
                 this = self
 
                 class _HTTPConnection(tornado.simple_httpclient._HTTPConnection):
-                    async def headers_received(self, first_line, headers):
+                    async def headers_received(
+                        self, first_line: Any, headers: Any
+                    ) -> None:
                         this.set_status(first_line.code, first_line.reason)
                         this.set_header("Transfer-Encoding", "chunked")
                         for k, v in headers.get_all():
@@ -206,17 +236,17 @@ class HTTPSTunnelServer(server.TunnelServer):
                             else:
                                 this.set_header(k, v)
                         this.set_header("Connection", "Close")
-                        this.flush()
+                        _ = this.flush()
 
-                    def data_received(self, chunk):
-                        chunk = b"%x\r\n%b\r\n" % (len(chunk), chunk)
-                        this.write(chunk)
-                        this.flush()
+                    def data_received(self, chunk: bytes) -> None:
+                        chunk_data: bytes = b"%x\r\n%b\r\n" % (len(chunk), chunk)
+                        this.write(chunk_data)
+                        _ = this.flush()
 
-                    def finish(self):
-                        chunk = b"0\r\n\r\n"
+                    def finish(self) -> None:
+                        chunk: bytes = b"0\r\n\r\n"
                         this.write(chunk)
-                        this.flush()
+                        _ = this.flush()
                         # self._release()
                         # self._on_end_request()
                         tunn["status"] = EnumHTTPTunnelStatus.IDLE
@@ -224,12 +254,12 @@ class HTTPSTunnelServer(server.TunnelServer):
                 http_client = tornado.simple_httpclient.SimpleAsyncHTTPClient(
                     force_instance=True
                 )
-                http_client.max_body_size = 500 * 1024 * 1024
-                http_client._connection_class = lambda: _HTTPConnection
-                tunnel.patch_tcp_client(http_client.tcp_client, tunn["tunnel"])
+                http_client.max_body_size = 500 * 1024 * 1024  # type: ignore[attr-defined]
+                http_client._connection_class = lambda: _HTTPConnection  # type: ignore[attr-defined]
+                tunnel.patch_tcp_client(http_client.tcp_client, tunn["tunnel"])  # type: ignore[attr-defined]
                 tunn["status"] = EnumHTTPTunnelStatus.BUSY
 
-                headers = {}
+                headers: Dict[str, Any] = {}
                 for hdr in self.request.headers:
                     if hdr == "Proxy-Connection":
                         if self.request.headers[hdr].lower() == "keep-alive":
@@ -239,7 +269,7 @@ class HTTPSTunnelServer(server.TunnelServer):
 
                 request = tornado.httpclient.HTTPRequest(
                     s_url,
-                    self.request.method,
+                    self.request.method or "GET",
                     headers=headers,
                     body=self.request.body,
                     follow_redirects=False,
@@ -248,12 +278,13 @@ class HTTPSTunnelServer(server.TunnelServer):
                 )
 
                 try:
-                    response = await http_client.fetch(request)
+                    _ = await http_client.fetch(request)
                 except tornado.httpclient.HTTPClientError as e:
-                    tunn["tunnel"].close()
+                    if tunn.get("tunnel"):
+                        tunn["tunnel"].close()  # type: ignore[attr-defined]
                     if e.code == 599:
                         self.set_status(502)
-                    else:
+                    elif e.response:
                         self.set_status(e.code, e.message)
                         for hdr in e.response.headers:
                             if hdr in ("Content-Length",):
@@ -266,34 +297,35 @@ class HTTPSTunnelServer(server.TunnelServer):
                         if e.response.body:
                             self.write(e.response.body)
 
-            async def get(self):
+            async def get(self) -> None:
                 return await self.handle_request()
 
-            async def head(self):
+            async def head(self) -> None:
                 return await self.handle_request()
 
-            async def options(self):
+            async def options(self) -> None:
                 return await self.handle_request()
 
-            async def patch(self):
+            async def patch(self) -> None:
                 return await self.handle_request()
 
-            async def post(self):
+            async def post(self) -> None:
                 return await self.handle_request()
 
-            async def put(self):
+            async def put(self) -> None:
                 return await self.handle_request()
 
-            async def connect(self):
-                path = self.request.path
+            async def connect(self) -> None:
+                path: str = self.request.path
+                address: Tuple[str, int]
                 if path.startswith("::1"):
                     address = ("::1", int(path[4:]))
                 else:
-                    address = path.split(":")
-                    address[1] = int(address[1])
-                    address = tuple(address)
+                    parts = path.split(":")
+                    address = (parts[0], int(parts[1]))
                 downstream = tunnel.TCPTunnel(
-                    self.request.connection.detach(), server_side=True
+                    self.request.connection.detach(),  # type: ignore[union-attr]
+                    server_side=True,
                 )
                 auth_data = this._listen_url.auth
                 if auth_data:
@@ -312,21 +344,27 @@ class HTTPSTunnelServer(server.TunnelServer):
                             "[%s] Connection to %s:%d refused due to wrong auth"
                             % (self.__class__.__name__, address[0], address[1])
                         )
-                        await downstream.write(b"HTTP/1.1 403 Forbidden\r\n\r\n")
+                        _ = await downstream.write(b"HTTP/1.1 403 Forbidden\r\n\r\n")
                         self._finished = True
                         return
 
+                # Get tunnel address safely
+                final_tun = this.final_tunnel
+                tunnel_addr: Optional[Tuple[str, int]] = None
+                if final_tun and final_tun.host and final_tun.port:
+                    tunnel_addr = (final_tun.host, final_tun.port)
+
                 with server.TunnelConnection(
-                    self.request.connection.context.address,
+                    self.request.connection.context.address,  # type: ignore[union-attr]
                     address,
-                    this.final_tunnel and this.final_tunnel.address,
+                    tunnel_address=tunnel_addr,
                 ) as tun_conn:
                     with this.create_tunnel_chain() as tunnel_chain:
                         try:
                             await tunnel_chain.create_tunnel(address)
                         except utils.TunnelError as e:
                             if not isinstance(e, utils.TunnelBlockedError):
-                                utils.logger.warn(
+                                utils.logger.warning(
                                     "[%s] Connect %s:%d failed: %s"
                                     % (
                                         self.__class__.__name__,
@@ -337,11 +375,11 @@ class HTTPSTunnelServer(server.TunnelServer):
                                 )
                             if not downstream.closed():
                                 if isinstance(e, utils.TunnelBlockedError):
-                                    await downstream.write(
+                                    _ = await downstream.write(
                                         b"HTTP/1.1 403 Forbidden\r\n\r\n"
                                     )
                                 else:
-                                    await downstream.write(
+                                    _ = await downstream.write(
                                         b"HTTP/1.1 504 Gateway timeout\r\n\r\n"
                                     )
                             else:
@@ -351,14 +389,18 @@ class HTTPSTunnelServer(server.TunnelServer):
                         else:
                             if tunnel_chain.tunnel_urls:
                                 tunnel_url = tunnel_chain.tunnel_urls[-1]
-                                tun_conn.update_tunnel_address(
-                                    (tunnel_url.host, tunnel_url.port)
-                                )
+                                if tunnel_url.host:
+                                    tun_conn.update_tunnel_address(
+                                        (tunnel_url.host, tunnel_url.port or 0)
+                                    )
 
                             if not downstream.closed():
-                                await downstream.write(
+                                _ = await downstream.write(
                                     b"HTTP/1.1 200 HTTPSTunnel Established\r\n\r\n"
                                 )
+                                if not tunnel_chain.tail:
+                                    return
+
                                 tasks = [
                                     this.forward_data_to_upstream(
                                         tun_conn, downstream, tunnel_chain.tail
@@ -367,9 +409,9 @@ class HTTPSTunnelServer(server.TunnelServer):
                                         tun_conn, downstream, tunnel_chain.tail
                                     ),
                                 ]
-                                await utils.AsyncTaskManager().wait_for_tasks(tasks)
+                                _ = await utils.AsyncTaskManager().wait_for_tasks(tasks)
                             else:
-                                utils.logger.warn(
+                                utils.logger.warning(
                                     "[%s] Downstream closed unexpectedly"
                                     % self.__class__.__name__
                                 )
@@ -377,7 +419,7 @@ class HTTPSTunnelServer(server.TunnelServer):
                         downstream.close()
                         self._finished = True
 
-        handlers = [
+        handlers: List[Tuple[List[str], str, type]] = [
             (["CONNECT"], r"", HTTPServerHandler),
             (["*"], r".*", HTTPServerHandler),
         ]
@@ -385,11 +427,12 @@ class HTTPSTunnelServer(server.TunnelServer):
         router = HTTPRouter(app, handlers)
         self._http_server = tornado.httpserver.HTTPServer(router)
 
-    def start(self):
-        self._http_server.listen(self._listen_url.port, self._listen_url.host)
+    def start(self) -> None:
+        port: int = self._listen_url.port or 8080
+        self._http_server.listen(port, self._listen_url.host)
         utils.logger.info(
             "[%s] HTTP server is listening on %s:%d"
-            % (self.__class__.__name__, self._listen_url.host, self._listen_url.port)
+            % (self.__class__.__name__, self._listen_url.host, port)
         )
 
 

@@ -1,71 +1,102 @@
 # -*- coding: utf-8 -*-
-"""Tunnel Chain
-"""
+"""Tunnel Chain"""
 
+import asyncio
 import copy
 import inspect
 import socket
 import time
+from typing import Any, Awaitable, Callable, List, Optional, Tuple, Type, TypeVar, Union
 
 import tornado.iostream
 
+from . import conf
 from . import registry
 from . import route
 from . import tunnel
 from . import utils
 
+_T = TypeVar("_T")
+
 
 class TunnelChain(object):
     """Tunnel Chain"""
 
-    def __init__(self, tunnel_router_or_urls, try_connect_count=1):
-        self._tunnel_router = self._tunnel_urls = None
+    _tunnel_router: Optional[route.TunnelRouter]
+    _tunnel_urls: Optional[List[utils.Url]]
+    _try_connect_count: int
+    _tunnel_list: List[Optional[tunnel.Tunnel]]
+    _index: int
+
+    def __init__(
+        self,
+        tunnel_router_or_urls: Union[route.TunnelRouter, List[utils.Url]],
+        try_connect_count: int = 1,
+    ) -> None:
+        self._tunnel_router = None
+        self._tunnel_urls = None
         if isinstance(tunnel_router_or_urls, route.TunnelRouter):
             self._tunnel_router = tunnel_router_or_urls
         else:
             self._tunnel_urls = tunnel_router_or_urls
         self._try_connect_count = try_connect_count
         if self._try_connect_count > 1:
-            self.create_tunnel = self._retry(self.create_tunnel)
+            self.create_tunnel = self._retry(self.create_tunnel)  # type: ignore[assignment,method-assign]
         self._tunnel_list = []
         self._index = 0
 
     @property
-    def head(self):
+    def head(self) -> Optional[tunnel.Tunnel]:
+        """Get the first tunnel in the chain."""
         if self._tunnel_list:
             return self._tunnel_list[0]
         else:
             return None
 
     @property
-    def tail(self):
+    def tail(self) -> Optional[tunnel.Tunnel]:
+        """Get the last tunnel in the chain."""
         if self._tunnel_list:
             return self._tunnel_list[-1]
         else:
             return None
 
     @property
-    def tunnel_urls(self):
+    def tunnel_urls(self) -> Optional[List[utils.Url]]:
+        """Get the list of tunnel URLs."""
         return self._tunnel_urls
 
-    def _retry(self, func):
-        async def func_wrapper(*args, **kwargs):
+    def _retry(
+        self, func: Callable[..., Awaitable[None]]
+    ) -> Callable[..., Awaitable[None]]:
+        """Wrap a function to retry on TunnelConnectError."""
+
+        async def func_wrapper(*args: Any, **kwargs: Any) -> None:
             for i in range(self._try_connect_count):
                 try:
-                    return await func(*args, **kwargs)
+                    await func(*args, **kwargs)
+                    return
                 except utils.TunnelConnectError as e:
                     if i < self._try_connect_count - 1:
                         utils.logger.exception(
                             "[%s] Call function %s %d failed"
                             % (self.__class__.__name__, func.__name__, (i + 1))
                         )
-                        await tornado.gen.sleep(1)
+                        await asyncio.sleep(1)
                     else:
                         raise e
 
         return func_wrapper
 
-    def get_cached_tunnel(self, tunnel_urls):
+    def get_cached_tunnel(self, tunnel_urls: List[utils.Url]) -> int:
+        """Find the index of the first cached tunnel in the URL list.
+
+        Args:
+            tunnel_urls: List of tunnel URLs to check
+
+        Returns:
+            The index of the cached tunnel, or -1 if no cached tunnel found
+        """
         for i, url in enumerate(tunnel_urls[::-1]):
             tunnel_class = registry.tunnel_registry[url.protocol]
             if not tunnel_class:
@@ -76,32 +107,44 @@ class TunnelChain(object):
                 return len(tunnel_urls) - i - 1
         return -1
 
-    async def select_tunnel(self, address):
-        tunnel_urls = self._tunnel_urls
+    async def select_tunnel(self, address: Tuple[str, int]) -> List[utils.Url]:
+        """Select tunnel URLs for the given address.
+
+        Args:
+            address: The (host, port) tuple to route
+
+        Returns:
+            List of tunnel URLs to use for the connection
+
+        Raises:
+            TunnelBlockedError: If the address is blocked
+        """
+        tunnel_urls: Optional[List[utils.Url]] = self._tunnel_urls
         if self._tunnel_router:
             selected_rule, selected_tunnel = await self._tunnel_router.select(address)
             registry.plugin_registry.notify(
                 "tunnel_selected", address, selected_rule, selected_tunnel
             )
             if selected_rule == "block":
-                utils.logger.warn(
+                utils.logger.warning(
                     "[%s] Address %s:%d is blocked"
                     % (self.__class__.__name__, address[0], address[1])
                 )
                 raise utils.TunnelBlockedError("%s:%d" % (address))
 
-            tunnel_urls = selected_tunnel.urls
+            if selected_tunnel:
+                tunnel_urls = selected_tunnel.urls
             utils.logger.info(
                 "[%s] Select tunnel [%s] %s to access %s:%d"
                 % (
                     self.__class__.__name__,
                     selected_rule,
-                    ", ".join([str(url) for url in tunnel_urls]),
+                    ", ".join([str(url) for url in (tunnel_urls or [])]),
                     address[0],
                     address[1],
                 )
             )
-        return copy.deepcopy(tunnel_urls)
+        return copy.deepcopy(tunnel_urls or [])
 
     async def get_tunnel_address(self, tunnel_url):
         tunnel_class = registry.tunnel_registry[tunnel_url.protocol]
@@ -114,7 +157,20 @@ class TunnelChain(object):
             return result
         return tunnel_url.address
 
-    async def create_tunnel(self, address, tunnel_urls=None):
+    async def create_tunnel(
+        self, address: Tuple[str, int], tunnel_urls: Optional[List[utils.Url]] = None
+    ) -> None:
+        """Create a tunnel chain to the target address.
+
+        Args:
+            address: The target (host, port) tuple to connect to
+            tunnel_urls: Optional list of tunnel URLs to use; if None, will select automatically
+
+        Raises:
+            TunnelBlockedError: If the address is blocked
+            TunnelConnectError: If connection to tunnel fails
+            TunnelError: If tunnel protocol is not registered
+        """
         tunnel_urls = tunnel_urls or await self.select_tunnel(address)
         self._tunnel_urls = tunnel_urls
         if len(tunnel_urls) > 1:
@@ -131,15 +187,17 @@ class TunnelChain(object):
                         )
                         raise utils.TunnelBlockedError("%s:%d" % (address))
 
-                    tunnel_urls.pop(i)  # Ignore internal tcp:// tunnel
+                    _ = tunnel_urls.pop(i)  # Ignore internal tcp:// tunnel
 
-        tunnel_address = address
+        tunnel_address: Tuple[str, int] = address
         if tunnel_urls:
             host, port = await self.get_tunnel_address(tunnel_urls[0])
             if host and port:
                 tunnel_address = host, port
 
-        cached_tunnel_index = self.get_cached_tunnel(tunnel_urls)
+        cached_tunnel_index: int = self.get_cached_tunnel(tunnel_urls)
+        tunn: Optional[tunnel.Tunnel] = None
+
         if cached_tunnel_index < 0:
             if self._tunnel_router:
                 tunnel_address = await self._tunnel_router.resolve(tunnel_address)
@@ -178,25 +236,28 @@ class TunnelChain(object):
             tunnel_urls = tunnel_urls[cached_tunnel_index:]
             tunn = None
 
-        time_start = time.time()
+        time_start: float = time.time()
         for i, url in enumerate(tunnel_urls):
             tunnel_class = registry.tunnel_registry[url.protocol]
             if not tunnel_class:
                 raise utils.TunnelError(
                     "%s tunnel not registered" % url.protocol.upper()
                 )
-            next_address = address
+            next_address: Tuple[str, int] = address
             if i < len(tunnel_urls) - 1:
                 next_url = tunnel_urls[i + 1]
                 next_address = await self.get_tunnel_address(next_url)
-            if self._tunnel_router and url.params.get("server_resolve", "false") != "true":
+            if (
+                self._tunnel_router
+                and url.params.get("server_resolve", "false") != "true"
+            ):
                 next_address = await self._tunnel_router.resolve(next_address)
 
             tunn = tunnel_class(tunn, url, next_address)
             self._tunnel_list.append(tunn)
 
-            time0 = time.time()
-            if not await tunn.connect():
+            time0: float = time.time()
+            if tunn and not await tunn.connect():
                 raise utils.TunnelConnectError(
                     "Create %s to %s:%d failed" % (tunn, address[0], address[1])
                 )
@@ -214,14 +275,22 @@ class TunnelChain(object):
             )
         )
 
-    def close(self):
-        tunnel = self.tail
-        if tunnel:
-            tunnel.close()
+    def close(self) -> None:
+        """Close the tunnel chain."""
+        tun = self.tail
+        if tun:
+            tun.close()
             self._tunnel_list = []
 
-    def __enter__(self):
+    def __enter__(self) -> "TunnelChain":
+        """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_value, exc_trackback):
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        exc_trackback: Any,
+    ) -> None:
+        """Context manager exit."""
         self.close()

@@ -5,3 +5,4 @@ msgpack
 python-daemon==2.3.2
 pyyaml
 tornado==6.1
+typing_extensions>=4.0.0; python_version < '3.12'

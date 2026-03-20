@@ -18,7 +18,7 @@ async def test_k8s_port_forward_tunnel():
     server = DemoTCPServer()
     server.listen(port2)
 
-    url = "k8s://localhost:%d/?kubeconfig=%s" % (
+    url = "k8s://localhost:%d/?kubeconfig=%s&verify_ssl=false" % (
         port1,
         os.path.join(res_dir, "kubeconfig"),
     )
@@ -43,14 +43,14 @@ async def test_k8s_exec_tunnel():
     server.listen(port2)
 
     url_list = [
-        "k8s+process://localhost:%d/bin/telnet?pod=pod-1&client_cert=%s&client_key=%s&ca_cert=%s"
+        "k8s+process://localhost:%d/bin/telnet?pod=pod-1&client_cert=%s&client_key=%s&ca_cert=%s&verify_ssl=false"
         % (
             port1,
             os.path.join(res_dir, "client.crt"),
             os.path.join(res_dir, "client.key"),
             os.path.join(res_dir, "ca.crt"),
         ),
-        "k8s+process://localhost:%d/bin/telnet?pod=pod-1&kubeconfig=%s"
+        "k8s+process://localhost:%d/bin/telnet?pod=pod-1&kubeconfig=%s&verify_ssl=false"
         % (port1, os.path.join(res_dir, "kubeconfig")),
     ]
 

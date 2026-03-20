@@ -121,14 +121,20 @@ class TestSSHTunnel(object):
 
     async def ensure_start_server(self):
         if not hasattr(self, "_server_started") or not self._server_started:
-            listen_url = "ssh://%s@127.0.0.1:%d/?public_key=id_rsa.pub" % (
-                self.username,
-                self.port,
-            )
-            self.__class__.server = ssh.SSHTunnelServer(listen_url, ["tcp://"])
-            self.__class__.server.start()
-            await asyncio.sleep(1)
-            self._server_started = True
+            for _ in range(3):
+                self.__class__.port = get_random_port()
+                listen_url = "ssh://%s@127.0.0.1:%d/?public_key=id_rsa.pub" % (
+                    self.username,
+                    self.port,
+                )
+                self.__class__.server = ssh.SSHTunnelServer(listen_url, ["tcp://"])
+                self.__class__.server.start()
+                await asyncio.sleep(1)
+                if getattr(self.__class__.server, "_conn", None):
+                    self._server_started = True
+                    break
+            else:
+                raise RuntimeError("Start SSH tunnel server failed")
 
     async def test_tcp_forward(self):
         await self.ensure_start_server()
