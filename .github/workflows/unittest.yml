@@ -28,10 +28,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install Dependencies
         run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            python -m pip install --upgrade pip pytest pytest-cov pytest-asyncio pytest-timeout codecov
-            python -m pip install -r requirements.txt
-            python -m pip list
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            sudo python -m pip install --upgrade pip pytest pytest-cov pytest-asyncio pytest-timeout codecov
+            sudo python -m pip install -r requirements.txt
+            sudo python -m pip list
           else
             python -m pip install --upgrade pip pytest pytest-cov pytest-asyncio pytest-timeout codecov
             python -m pip install -r requirements.txt
@@ -39,8 +39,8 @@ jobs:
         shell: bash
       - name: Run Tests
         run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            python -m pytest --cov=.
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            sudo python -m pytest --cov=.
           else
             python -m pytest --cov=.
           fi
