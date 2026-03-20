@@ -259,6 +259,9 @@ def handle_args(args: argparse.Namespace) -> Optional[int]:
             else:
                 utils.logger.error("[PluginLoader] Load plugin %s failed" % plugin_name)
 
+    # Python 3.14+: ensure an asyncio event loop exists before Tornado touches IOLoop.current()
+    utils.get_or_create_event_loop()
+
     tunnel_servers: list[server.TunnelServer] = []
     if args.config:
         if not os.path.exists(args.config):
@@ -267,7 +270,7 @@ def handle_args(args: argparse.Namespace) -> Optional[int]:
         config: conf.TunnelConfiguration = conf.TunnelConfiguration(
             args.config, auto_reload=args.auto_reload
         )
-        loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
+        loop: asyncio.AbstractEventLoop = utils.get_or_create_event_loop()
         loop.run_until_complete(config.load())
         router: route.TunnelRouter = route.TunnelRouter(config)
         for listen_url in config.listen_urls:
@@ -390,7 +393,7 @@ def main() -> int:
         if args.stop_on_error:
             loop.stop()
 
-    loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
+    loop: asyncio.AbstractEventLoop = utils.get_or_create_event_loop()
     loop.set_exception_handler(handle_exception)
 
     try:

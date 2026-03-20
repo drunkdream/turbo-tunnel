@@ -25,6 +25,18 @@ TLDS = [".com", ".net", ".cn", ".org", ".io"]
 logger = logging.getLogger("turbo-tunnel")
 default_resolve_file = "/etc/resolv.conf"
 
+
+def get_or_create_event_loop():
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            return asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
+
 def verbose_logging(msg):
     if logger.level < logging.DEBUG:
         return logger.debug(msg)
@@ -325,7 +337,7 @@ class AsyncFileDescriptor(object):
     """Async File Descriptor"""
 
     def __init__(self, fd):
-        self._loop = asyncio.get_event_loop()
+        self._loop = get_or_create_event_loop()
         self._fd = fd
         self._event = asyncio.Event()
         self._buffer = bytearray()
@@ -520,14 +532,15 @@ async def resolve_address(address):
                 logger.info("[DNS] %s => %s" % (address[0], item))
                 break
 
-        resolve_cache[address] = {"time": time.time(), "result": result}
+        if is_ip_address(result[0]):
+            resolve_cache[address] = {"time": time.time(), "result": result}
         return result
 
     return address
 
 
 def safe_ensure_future(coro, loop=None):
-    loop = loop or asyncio.get_event_loop()
+    loop = loop or get_or_create_event_loop()
     fut = loop.create_future()
 
     async def _wrap():
@@ -536,16 +549,15 @@ def safe_ensure_future(coro, loop=None):
         except Exception as e:
             fut.set_exception(e)
 
-    asyncio.ensure_future(_wrap())
+    loop.create_task(_wrap())
     return fut
 
 
 async def wait_for_tasks(tasks, return_when):
-    if hasattr(asyncio, "create_task"):
-        tasks = [
-            asyncio.create_task(task) if not isinstance(task, asyncio.Task) else task
-            for task in tasks
-        ]
+    tasks = [
+        asyncio.ensure_future(task) if not isinstance(task, asyncio.Task) else task
+        for task in tasks
+    ]
     return await asyncio.wait(tasks, return_when=return_when)
 
 

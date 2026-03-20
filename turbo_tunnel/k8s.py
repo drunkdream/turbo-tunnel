@@ -143,6 +143,9 @@ class KubernetesPortForwardTunnel(KubernetesTunnel):
             client_cert,
             client_key,
         )
+        verify_ssl = url.params.get("verify_ssl")
+        if verify_ssl is not None:
+            ws_url += "&verify_ssl=%s" % verify_ssl
         return ws_url
 
     async def wait_for_connecting(self, timeout=15):
@@ -202,6 +205,9 @@ class KubernetesExecTunnel(KubernetesTunnel):
             client_cert,
             client_key,
         )
+        verify_ssl = url.params.get("verify_ssl")
+        if verify_ssl is not None:
+            ws_url += "&verify_ssl=%s" % verify_ssl
         return ws_url
 
     async def wait_for_connecting(self, timeout=15):

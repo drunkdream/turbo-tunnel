@@ -26,7 +26,10 @@ class TerminalScreen(object):
         curses.use_default_colors()
         self._views = []
         self._running = True
-        asyncio.ensure_future(self.check_screen_size_task())
+        try:
+            asyncio.get_running_loop().create_task(self.check_screen_size_task())
+        except RuntimeError:
+            pass
         # atexit.register(lambda: curses.endwin())
 
     @property
@@ -513,7 +516,7 @@ class TerminalPlugin(Plugin):
 
         self._conn_list = []
         self._running = True
-        asyncio.ensure_future(self.run())
+        utils.safe_ensure_future(self.run())
 
     def on_unload(self):
         self._running = False

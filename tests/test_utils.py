@@ -85,11 +85,17 @@ async def test_wait_for_tasks2():
 
 async def test_resolve_address():
     orig_getaddrinfo = socket.getaddrinfo
+    orig_resolve = utils._resolve
 
     def hooked_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
         raise RuntimeError("socket.getaddrinfo should not called")
 
+    async def hooked_resolve(resolver, name_server, domain, queue):
+        if domain == "www.github.com":
+            await queue.put("1.1.1.1")
+
     socket.getaddrinfo = hooked_getaddrinfo
+    utils._resolve = hooked_resolve
 
     async def resolve(domain):
         time0 = time.time()
@@ -97,15 +103,16 @@ async def test_resolve_address():
         time1 = time.time()
         return address[0], time1 - time0
 
-    result, cost = await resolve("www.github.com")
-    socket.getaddrinfo = orig_getaddrinfo
-    assert re.match(r"[\d\.]+", result)
-    assert cost < 1
-    socket.getaddrinfo = hooked_getaddrinfo
-    result, cost = await resolve("domainnotexist.com")
-    socket.getaddrinfo = orig_getaddrinfo
-    assert result == "domainnotexist.com"
-    assert cost < 6
+    try:
+        result, cost = await resolve("www.github.com")
+        assert re.match(r"[\d\.]+", result)
+        assert cost < 1
+        result, cost = await resolve("domainnotexist.com")
+        assert result == "domainnotexist.com"
+        assert cost < 6
+    finally:
+        utils._resolve = orig_resolve
+        socket.getaddrinfo = orig_getaddrinfo
 
 
 def test_checksum():
