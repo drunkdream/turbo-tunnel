@@ -427,6 +427,8 @@ def is_ip_address(addr):
 def get_nameservers():
     if sys.platform == "darwin" and not os.path.isfile(default_resolve_file):
         return []
+    if not os.path.isfile(default_resolve_file):
+        return list(async_dns.core.config.core_config.get("default_nameservers"))
     name_servers = async_dns.core.config.get_nameservers()
     name_servers = [it for it in name_servers if "." in it]
     name_servers.extend(async_dns.core.config.core_config.get("default_nameservers"))
