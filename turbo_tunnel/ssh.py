@@ -340,10 +340,12 @@ class SSHTunnelServer(server.TunnelServer, MicroSSHServer):
         )
 
     def start(self):
-        if sys.platform == "win32":
-            loop = asyncio.ProactorEventLoop()
-            asyncio.set_event_loop(loop)
-        asyncio.ensure_future(MicroSSHServer.start(self))
+        # Reuse the already-running event loop (Tornado's IOLoop) rather than
+        # creating a new ProactorEventLoop and calling set_event_loop(). Doing
+        # the latter would replace the process-wide loop with a second instance
+        # and make later coroutines (DNS resolution, subprocess pipes) attach to
+        # a different loop -> "attached to a different loop" RuntimeError.
+        asyncio.get_event_loop().create_task(MicroSSHServer.start(self))
 
 
 class SSHClientConnection(asyncssh.SSHClientConnection):
