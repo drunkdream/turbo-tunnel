@@ -24,6 +24,10 @@ from . import route
 from . import server
 from . import utils
 
+# How often the Windows event loop is woken up so that Ctrl+C can be delivered.
+# See the comment in main() for why this is needed.
+CONTROL_C_POLL_INTERVAL = 0.5
+
 
 class HighlightFormatter(logging.Formatter):
 
@@ -209,9 +213,8 @@ def handle_args(args: argparse.Namespace) -> Optional[int]:
 
     handler: logging.StreamHandler[Any] = logging.StreamHandler(sys.stdout)
     fmt: str = "[%(asctime)s][%(levelname)s]%(message)s"
-    enable_color_output: bool = not args.no_color
-    if enable_color_output and sys.platform == "win32":
-        enable_color_output = utils.enable_native_ansi()
+    enable_color_output: bool = utils.should_colorize(args.no_color)
+    utils.set_color_enabled(enable_color_output)
     formatter: logging.Formatter
     if not enable_color_output:
         formatter = logging.Formatter(fmt)
@@ -287,10 +290,12 @@ def handle_args(args: argparse.Namespace) -> Optional[int]:
     if args.retry:
         server.TunnelServer.retry_count = args.retry
 
-    if sys.platform == "win32" and sys.version_info[1] >= 8:
-        # on Windows, the default asyncio event loop is ProactorEventLoop from python3.8
-        loop = asyncio.SelectorEventLoop()
-        asyncio.set_event_loop(loop)
+    # NOTE: Do NOT force a SelectorEventLoop here. On Windows the default
+    # ProactorEventLoop is the only one that supports both ICMP raw sockets
+    # and asyncio subprocesses (verified on this machine). Creating a second
+    # event loop instance and set_event_loop() here would also split the
+    # process across two loops and trigger "attached to a different loop"
+    # errors once the SSH server starts.
 
     for tunnel_server in tunnel_servers:
         tunnel_server.start()
@@ -304,7 +309,14 @@ def main() -> int:
     Returns:
         Exit code (0 for success, non-zero for error)
     """
-    print("\x1b[0;36m%s \x1b[0;32m v%s\x1b[0m\n" % (BANNER.rstrip(), VERSION))
+    # The banner is printed before argparse runs, so --no-color is detected from
+    # argv directly. The resulting decision is then shared with the rest of the
+    # program through utils.color_enabled().
+    utils.set_color_enabled(utils.should_colorize("--no-color" in sys.argv[1:]))
+    if utils.color_enabled():
+        print("\x1b[0;36m%s \x1b[0;32m v%s\x1b[0m\n" % (BANNER.rstrip(), VERSION))
+    else:
+        print("%s v%s\n" % (BANNER.rstrip(), VERSION))
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
         prog="turbo-tunnel", description="TurboTunnel cmdline tool v%s" % VERSION
     )
@@ -384,17 +396,36 @@ def main() -> int:
         message: str = context["message"]
         exp: Optional[BaseException] = context.get("exception")
         if exp:
-            message = "".join(
-                traceback.format_exception(
-                    etype=type(exp), value=exp, tb=exp.__traceback__
+            try:
+                message = "".join(
+                    traceback.format_exception(type(exp), exp, exp.__traceback__)
                 )
-            )
+            except TypeError:
+                # Python 3.10+ renamed traceback.format_exception to take a
+                # single exception instance as the first positional argument.
+                message = "".join(traceback.format_exception(exp))
         print(message, file=sys.stderr)
         if args.stop_on_error:
             loop.stop()
 
     loop: asyncio.AbstractEventLoop = utils.get_or_create_event_loop()
     loop.set_exception_handler(handle_exception)
+
+    if sys.platform == "win32":
+        # On Windows the default loop is ProactorEventLoop. When there is nothing
+        # to do it blocks inside GetQueuedCompletionStatus with no timeout, and
+        # Windows only delivers SIGINT once the main thread gets back to Python
+        # bytecode -- so Ctrl+C looks like it does nothing. A periodic tick caps
+        # that block and lets the interpreter run the signal handler.
+        #
+        # Do NOT "fix" this by switching to SelectorEventLoop: on Windows it
+        # cannot select() on raw sockets (WSAEINVAL -> breaks the ICMP tunnel)
+        # and it does not support asyncio subprocesses (NotImplementedError ->
+        # breaks ssh). Both were verified on this machine.
+        def _keep_loop_alive() -> None:
+            loop.call_later(CONTROL_C_POLL_INTERVAL, _keep_loop_alive)
+
+        loop.call_soon(_keep_loop_alive)
 
     try:
         tornado.ioloop.IOLoop.current().start()

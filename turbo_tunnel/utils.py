@@ -3,11 +3,13 @@
 """
 
 import asyncio
+import ctypes
 import inspect
 import logging
 import os
 import random
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -424,9 +426,117 @@ def is_ip_address(addr):
     return is_ipv4_address(addr) or is_ipv6_address(addr)
 
 
+def _get_windows_nameservers():
+    """Discover the DNS servers Windows actually configures on its interfaces.
+
+    async_dns hardcodes public resolvers (8.8.8.8 / 8.8.4.4) which are
+    unreachable in many locked-down networks, so we prefer the OS-configured
+    servers. They are read through the IP Helper API by wrapping
+    ``GetAdaptersAddresses`` (iphlpapi.dll) and walking every adapter's
+    ``FirstDnsServerAddress`` list, instead of scraping ``ipconfig /all``
+    text (which depends on the console code page and localized titles).
+    """
+    if sys.platform != "win32":
+        return []
+
+    class SOCKADDR_IN(ctypes.Structure):
+        _fields_ = [
+            ("sin_family", ctypes.c_ushort),
+            ("sin_port", ctypes.c_ushort),
+            ("sin_addr", ctypes.c_ubyte * 4),
+            ("sin_zero", ctypes.c_char * 8),
+        ]
+
+    class SOCKET_ADDRESS(ctypes.Structure):
+        _fields_ = [
+            ("lpSockaddr", ctypes.POINTER(SOCKADDR_IN)),
+            ("iSockaddrLength", ctypes.c_int),
+        ]
+
+    class IP_ADAPTER_DNS_SERVER_ADDRESS(ctypes.Structure):
+        pass
+
+    IP_ADAPTER_DNS_SERVER_ADDRESS._fields_ = [
+        # union { ULONGLONG Alignment; struct { ULONG Length; DWORD Reserved; }; }
+        ("Alignment", ctypes.c_ulonglong),
+        ("Next", ctypes.POINTER(IP_ADAPTER_DNS_SERVER_ADDRESS)),
+        ("Address", SOCKET_ADDRESS),
+    ]
+
+    class IP_ADAPTER_ADDRESSES(ctypes.Structure):
+        pass
+
+    # Only the leading members are declared. They are laid out at the same
+    # offsets as in the real structure and FirstDnsServerAddress is the last
+    # one we need, so the remaining fields can be left out.
+    IP_ADAPTER_ADDRESSES._fields_ = [
+        ("Alignment", ctypes.c_ulonglong),
+        ("Next", ctypes.POINTER(IP_ADAPTER_ADDRESSES)),
+        ("AdapterName", ctypes.c_void_p),
+        ("FirstUnicastAddress", ctypes.c_void_p),
+        ("FirstAnycastAddress", ctypes.c_void_p),
+        ("FirstMulticastAddress", ctypes.c_void_p),
+        ("FirstDnsServerAddress", ctypes.POINTER(IP_ADAPTER_DNS_SERVER_ADDRESS)),
+    ]
+
+    ERROR_BUFFER_OVERFLOW = 111
+    get_adapters_addresses = ctypes.windll.iphlpapi.GetAdaptersAddresses
+    get_adapters_addresses.argtypes = [
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_ulong),
+    ]
+    get_adapters_addresses.restype = ctypes.c_ulong
+
+    size = ctypes.c_ulong(0)
+    # The first call only reports the required buffer size.
+    ret = get_adapters_addresses(socket.AF_UNSPEC, 0, None, None, ctypes.byref(size))
+    if ret and ret != ERROR_BUFFER_OVERFLOW:
+        return []
+    buffer = ctypes.create_string_buffer(size.value or 16384)
+    ret = get_adapters_addresses(
+        socket.AF_UNSPEC,
+        0,
+        None,
+        ctypes.cast(buffer, ctypes.c_void_p),
+        ctypes.byref(size),
+    )
+    if ret:
+        return []
+
+    servers = []
+    seen = set()
+    adapter = ctypes.cast(buffer, ctypes.POINTER(IP_ADAPTER_ADDRESSES))
+    while adapter:
+        dns_server = adapter.contents.FirstDnsServerAddress
+        while dns_server:
+            sockaddr = dns_server.contents.Address.lpSockaddr
+            # IPv4 only, matching what the ipconfig parser used to return.
+            if sockaddr and sockaddr.contents.sin_family == socket.AF_INET:
+                ip = socket.inet_ntoa(bytes(sockaddr.contents.sin_addr))
+                if ip not in seen and ip != "0.0.0.0":
+                    seen.add(ip)
+                    servers.append(ip)
+            dns_server = dns_server.contents.Next
+        adapter = adapter.contents.Next
+    return servers
+
+
 def get_nameservers():
     if sys.platform == "darwin" and not os.path.isfile(default_resolve_file):
         return []
+    if sys.platform == "win32":
+        # Windows has no /etc/resolv.conf. The async_dns hardcoded public
+        # resolvers (8.8.8.8 / 8.8.4.4) are often blocked, so prefer the DNS
+        # servers the OS really uses, and fall back to the async_dns defaults.
+        system_ns = _get_windows_nameservers()
+        defaults = list(async_dns.core.config.core_config.get("default_nameservers"))
+        if system_ns:
+            system_ns.extend(defaults)
+            return system_ns
+        return defaults
     if not os.path.isfile(default_resolve_file):
         return list(async_dns.core.config.core_config.get("default_nameservers"))
     name_servers = async_dns.core.config.get_nameservers()
@@ -624,7 +734,8 @@ def checksum(data):
     for i in range(0, len(data) - n, 2):
         s += data[i + 1] + (data[i] << 8)
     if n:
-        s += data[i + 1] << 8
+        # odd length: the last byte is the high byte of a zero-padded word
+        s += data[-1] << 8
 
     while s >> 16:
         s = (s & 0xFFFF) + (s >> 16)
@@ -660,4 +771,38 @@ def enable_native_ansi():
             )
             return False
 
+    return True
+
+
+_color_enabled = True
+
+
+def set_color_enabled(enabled: bool) -> None:
+    """Turn ANSI color output on/off for the whole process.
+
+    Every place that emits color (log formatter, startup banner, terminal
+    plugin) consults this via color_enabled(), so the decision is made once and
+    shared instead of each caller hard-coding escape sequences.
+    """
+    global _color_enabled
+    _color_enabled = enabled
+
+
+def color_enabled() -> bool:
+    """Whether ANSI color output is currently enabled."""
+    return _color_enabled
+
+
+def should_colorize(no_color: bool = False) -> bool:
+    """Decide whether ANSI color output should be used.
+
+    Honours --no-color. On Windows color is only used when the console actually
+    supports native ANSI (virtual terminal processing). Output that is not a
+    TTY (redirected to a file or piped) is never colorized, so redirected logs
+    and files stay free of escape sequences.
+    """
+    if no_color or not sys.stdout.isatty():
+        return False
+    if sys.platform == "win32":
+        return enable_native_ansi()
     return True
