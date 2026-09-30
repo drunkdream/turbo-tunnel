@@ -21,18 +21,37 @@ class TunnelRouter(object):
     def __init__(self, conf: "conf.TunnelConfiguration") -> None:
         self._conf = conf
 
-    async def resolve(self, address: Tuple[str, int]) -> Tuple[str, int]:
+    async def resolve(
+        self, address: Tuple[str, int], name_servers: Optional[List[str]] = None
+    ) -> Tuple[str, int]:
         """Resolve address using hosts mapping or DNS resolution.
 
         Args:
             address: The (host, port) tuple to resolve
+            name_servers: Optional list of nameservers to use instead of the
+                globally discovered ones.
 
         Returns:
             The resolved (host, port) tuple
         """
         if address[0] in self._conf.hosts:
             return self._conf.hosts[address[0]], address[1]
-        return await utils.resolve_address(address)
+        return await utils.resolve_address(address, name_servers)
+
+    def nameservers_for_url(self, url: "utils.Url") -> Optional[List[str]]:
+        """Return the nameservers configured for the tunnel whose url matches.
+
+        Args:
+            url: The tunnel url to look up.
+
+        Returns:
+            The list of nameservers, or None if no tunnel matches or the
+            matched tunnel has no custom nameservers.
+        """
+        for tunnel in self._conf.tunnels:
+            if tunnel.url == url:
+                return tunnel.nameservers or None
+        return None
 
     async def select_tunnel(
         self, address_list: List[Tuple[str, int]]
@@ -82,6 +101,14 @@ class TunnelRouter(object):
 
         rule, tunnel = await self.select_tunnel(address_list)
         if rule:
+            # When the matched tunnel declares custom nameservers, resolve the
+            # original domain again with those nameservers so routing rules and
+            # the final connection use the tunnel-specific DNS resolution.
+            if not is_ip_address and tunnel and tunnel.nameservers:
+                resolved_address = await self.resolve(address, tunnel.nameservers)
+                if resolved_address != address and resolved_address not in address_list:
+                    address_list.append(resolved_address)
+                    rule, tunnel = await self.select_tunnel(address_list)
             return rule, tunnel
         # select default tunnel
         return "default", self._conf.default_tunnel

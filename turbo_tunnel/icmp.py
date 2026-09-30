@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import collections
 import hashlib
 import hmac
 import os
@@ -27,6 +28,12 @@ from . import utils
 # networks; override per-server via the `ping_timeout` URL parameter (formerly
 # `timeout` / `pong_delay`), e.g. `icmp://0.0.0.0?ping_timeout=0.5`.
 PING_TIMEOUT_DEFAULT = 5
+
+# Default and lower-bound for the adaptive retransmission timeout (RTO). The RTO
+# follows RFC 6298 (SRTT + 4*RTTVAR) and is clamped to RTO_MIN so jitter does not
+# trigger spurious retransmissions (doc 5.4.5).
+DEFAULT_RTO = 2.0
+RTO_MIN = 1.0
 
 
 class EnumICMPType(object):
@@ -532,6 +539,21 @@ class ICMPSessionStream(object):
         self._last_reply_time = 0
         self._auth_nonce = None
         self._auth_time = 0
+        # Downlink (server -> client) reliability (doc 5.4): fragments that have
+        # been sent but not yet cumulatively acknowledged, plus a FIFO of new
+        # downlink payloads waiting for a pull request to ride on.
+        self._downlink_seq = 0
+        self._downlink_queue = collections.deque()
+        self._downlink_unacked = {}
+        self._downlink_last_ack = 0
+        # Adaptive RTO state (doc 5.4.5).
+        self._srtt = None
+        self._rttvar = None
+        self._rtt_init = True
+        # Client-side pull triggers (doc 4.2 / 5.6.2): a gap or a stale ack that
+        # must be reported to the server on the next pull.
+        self._gap_pending = False
+        self._ack_dirty = False
 
     @property
     def max_data_size(self):
@@ -664,21 +686,26 @@ class ICMPSessionStream(object):
             utils.logger.info(
                 "[%s] Ignore duplicated message %d" % (self.__class__.__name__, seq_num)
             )
-        else:
-            delay_time = (
-                self.__class__.DELAY_ACK_TIME
-                if len(trans_packet.padding) < self._sock.max_data_size
-                else 0
-            )
-            utils.safe_ensure_future(
-                self.delay_ack(
-                    seq_num,
-                    delay_time,
-                )
-            )
+        # NOTE: keepalive (PONG/PING) is no longer triggered here. Every client
+        # request is answered by the server's per-request dispatch (doc 5.3), and
+        # the client's ping_task maintains idle keepalive, so scheduling a
+        # separate delayed ack would produce a duplicate reply to the same request.
 
     def on_data_received(self, seq_num, buffer):
         self._last_data_time = time.time()
+        if seq_num == 0:
+            # seq 0 is a pure ACK reply that carries no downlink data (doc 5.4.1).
+            return
+        if seq_num <= self._last_seq:
+            # Duplicate / already-delivered fragment: do NOT re-deliver, but make
+            # sure the cumulative ack is re-reported on the next pull so a
+            # post-hole-fill ack loss cannot cause a second hole-fill (doc 3.3.4).
+            self._ack_dirty = True
+            return
+        if seq_num > self._last_seq + 1:
+            # Out-of-order delivery: a gap exists, the client must pull so the
+            # server learns which fragment is missing and hole-fills it (doc 5.6.2).
+            self._gap_pending = True
         self._recving_buffers[seq_num] = buffer
         while (self._last_seq + 1) in self._recving_buffers:
             buffer = self._recving_buffers.pop(self._last_seq + 1)
@@ -826,6 +853,78 @@ class ICMPSessionStream(object):
             )
 
 
+    # ------------------------------------------------------------------
+    # Downlink (server -> client) reliability (doc 5.4)
+    # ------------------------------------------------------------------
+    @property
+    def next_downlink_seq(self):
+        self._downlink_seq += 1
+        return self._downlink_seq
+
+    def enqueue_downlink(self, event, buffer, wait_for_ack):
+        self._downlink_queue.append((event, buffer, wait_for_ack))
+
+    def pick_downlink_to_send(self, now, rto):
+        """Pick the next downlink fragment to ride on the current client request.
+
+        Returns ``(payload, event, seq, is_new)``. Hole-fill (a previously sent
+        fragment whose RTO has expired without being acknowledged) takes priority
+        over brand-new data, preventing head-of-line blocking (doc 5.4.4). When
+        nothing is pending, returns ``(None, None, None, False)`` so the caller
+        can send a pure ACK instead.
+        """
+        oldest_seq = None
+        for seq, entry in self._downlink_unacked.items():
+            if now - entry[2] >= rto:
+                if oldest_seq is None or seq < oldest_seq:
+                    oldest_seq = seq
+        if oldest_seq is not None:
+            payload, event, _sent_time, _retry = self._downlink_unacked[oldest_seq]
+            return payload, event, oldest_seq, False
+        if self._downlink_queue:
+            event, buffer, _wait = self._downlink_queue.popleft()
+            seq = self.next_downlink_seq
+            return buffer, event, seq, True
+        return None, None, None, False
+
+    def record_downlink_sent(self, seq, payload, event, is_new, now):
+        if is_new:
+            self._downlink_unacked[seq] = (payload, event, now, 0)
+        else:
+            _payload, _event, _sent_time, retry = self._downlink_unacked[seq]
+            self._downlink_unacked[seq] = (_payload, _event, now, retry + 1)
+
+    def release_downlink(self, ack, now=None):
+        """Release downlink fragments acknowledged by the client's cumulative ack
+        and sample the RTT for the adaptive RTO (doc 5.4.5)."""
+        if ack <= 0:
+            return
+        now = now or time.time()
+        for seq in list(self._downlink_unacked):
+            if seq <= ack:
+                _payload, _event, sent_time, _retry = self._downlink_unacked.pop(seq)
+                if sent_time:
+                    self.rtt_sample(now - sent_time)
+        if ack > self._downlink_last_ack:
+            self._downlink_last_ack = ack
+
+    def rtt_sample(self, rtt):
+        if rtt <= 0:
+            return
+        if self._srtt is None or self._rtt_init:
+            self._srtt = rtt
+            self._rttvar = rtt / 2.0
+            self._rtt_init = False
+        else:
+            self._rttvar = (3.0 / 4.0) * self._rttvar + (1.0 / 4.0) * abs(self._srtt - rtt)
+            self._srtt = (7.0 / 8.0) * self._srtt + (1.0 / 8.0) * rtt
+
+    def current_rto(self):
+        if self._srtt is None:
+            return DEFAULT_RTO
+        return max(self._srtt + 4.0 * self._rttvar, RTO_MIN)
+
+
 class SessionStreamManager(object):
     def __init__(self, ping_timeout=PING_TIMEOUT_DEFAULT):
         self._session_streams = []
@@ -903,7 +1002,12 @@ class ICMPTransportSocket(object):
 
     PING_INTERVAL = 5
     PING_TIMEOUT = 30
-    MAX_IDLE_SLOTS = 500
+    # Cap on the number of recent client requests tracked per session. In the
+    # pull model each request is answered immediately (doc 5.3), so slots are no
+    # longer "consumed" by replies and simply expire after PING_INTERVAL+1s. This
+    # value only guards against a pathological request flood; size it for a busy
+    # link (steady-state ~ rate * (PING_INTERVAL+1)) so normal traffic never hits it.
+    MAX_IDLE_SLOTS = 16384
 
     STATUS_NOT_CONNECT = 0
     STATUS_CONNECTING = 1
@@ -926,6 +1030,9 @@ class ICMPTransportSocket(object):
         self._last_acks = {}
         self._last_send_times = {}
         self._running = True
+        self._srtt = None
+        self._rttvar = None
+        self._rtt_init = True
         utils.safe_ensure_future(self.send_packets_task())
 
     @property
@@ -972,12 +1079,15 @@ class ICMPTransportSocket(object):
 
         ack_matched = False
         delete_list = []
+        now = time.time()
         for message in self._sending_buffers:
             if message["address"] != address or message["msg_seq"] == 0:
                 continue
 
             if message["msg_seq"] <= ack_num:
-                # message is received by peer
+                # message is received by peer; sample RTT for adaptive RTO (doc 5.4.5)
+                if message.get("timestamp"):
+                    self._update_rtt(now - message["timestamp"])
                 delete_list.append(message)
                 self._unack_packets -= 1
                 if message["count"] > 1:
@@ -1028,6 +1138,22 @@ class ICMPTransportSocket(object):
             self._sending_buffers.remove(it)
             self._unack_packets = max(0, self._unack_packets - 1)
 
+    def _update_rtt(self, rtt):
+        if rtt <= 0:
+            return
+        if self._srtt is None or self._rtt_init:
+            self._srtt = rtt
+            self._rttvar = rtt / 2.0
+            self._rtt_init = False
+        else:
+            self._rttvar = (3.0 / 4.0) * self._rttvar + (1.0 / 4.0) * abs(self._srtt - rtt)
+            self._srtt = (7.0 / 8.0) * self._srtt + (1.0 / 8.0) * rtt
+
+    def current_rto(self):
+        if self._srtt is None:
+            return DEFAULT_RTO
+        return max(self._srtt + 4.0 * self._rttvar, RTO_MIN)
+
     async def wait_for_ack(self, address, msg_seq, timeout=None):
         time0 = time.time()
         while not timeout or time.time() - time0 < timeout:
@@ -1068,7 +1194,7 @@ class ICMPTransportSocket(object):
                     continue
                 if (
                     message["wait_for_ack"]
-                    and time.time() - message["timestamp"] < self.__class__.ACK_TIMEOUT
+                    and time.time() - message["timestamp"] < self.current_rto()
                 ):
                     continue
                 if message["address"][0] not in send_times:
@@ -1362,12 +1488,13 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                 icmp_packet.ident,
                 icmp_packet.sequence,
             )
-            if (
-                trans_packet.event == ICMPTransportPacket.OP_PONG
-                and icmp_packet.sequence in self._current_pings
-            ):
+            if icmp_packet.sequence in self._current_pings:
+                # Any reply to a ping request clears the pending ping, not just a
+                # PONG: a PING may legitimately carry downlink data as its reply
+                # (doc 5.3), so the keepalive timer must be satisfied either way.
                 request_time = self._current_pings.pop(icmp_packet.sequence)
-                message += ", ping_time=%.2fs" % (time.time() - request_time)
+                if trans_packet.event == ICMPTransportPacket.OP_PONG:
+                    message += ", ping_time=%.2fs" % (time.time() - request_time)
 
             utils.logger.debug(message)
 
@@ -1614,6 +1741,22 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
         ping_concurrency = min_ping_concurrency
         last_ping_time = 0
         while self._status == ICMPTransportSocket.STATUS_ESTABLISHED:
+            # Event-driven pull (doc 4.2 / 5.6.2): if we detected a gap (missing
+            # downlink fragment) or a duplicate fragment that must re-report an
+            # ack, send a pull immediately instead of waiting for the idle PING
+            # cycle, so the server learns about the gap and hole-fills without
+            # delay.
+            if self._session_stream._gap_pending or self._session_stream._ack_dirty:
+                self._session_stream._gap_pending = False
+                self._session_stream._ack_dirty = False
+                await self.send(
+                    ICMPTransportPacket.OP_PING,
+                    msg_seq=0,
+                    wait_for_ack=False,
+                    buffer=_pack_msgpack_payload({}),
+                )
+                last_ping_time = time.time()
+
             idle_time = time.time() - self._session_stream.last_alive_time
             if idle_time >= self.__class__.PING_TIMEOUT * 3:
                 # connection timeout
@@ -1795,6 +1938,33 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
                     )
                     self._sessmgr.remove_session_stream(session_stream)
 
+    async def _send_reply(
+        self, session_stream, event, buffer, icmp_ident, icmp_seq, msg_seq, wait_for_ack
+    ):
+        """Send a single reply bound to the given client request identity.
+
+        The reply always carries the cumulative uplink ack so the client can
+        release its unacknowledged uplink fragments (doc 5.4.1). Reliability of
+        downlink data is handled separately by the per-request dispatch +
+        ``downlink_unacked`` hole-fill, so replies use ``wait_for_ack=False`` and
+        are sent exactly once by the underlying transport.
+        """
+        ack_num = session_stream.next_ack
+        session_stream.on_send_ack(ack_num)
+        await super(ICMPTransportServerSocket, self).send(
+            session_stream.client_address[0],
+            msg_seq,
+            ack_num,
+            event,
+            session_stream.client_address[1],
+            session_stream.server_address[1],
+            buffer,
+            icmp_ident=icmp_ident,
+            icmp_seq=icmp_seq,
+            wait_for_ack=wait_for_ack,
+        )
+        session_stream.last_reply_time = time.time()
+
     async def send(
         self,
         session_stream,
@@ -1804,48 +1974,38 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
         wait_for_ack=True,
         pong_icmp_seq=None,
     ):
-        if msg_seq is None:
-            msg_seq = session_stream.next_seq
-        ack_num = session_stream.next_ack
-        session_stream.on_send_ack(ack_num)
-        if event == ICMPTransportPacket.OP_PONG:
-            # PONG is a keepalive control packet and must NOT consume a response
-            # slot. Downlink data already drains the pool, so if PONG competed
-            # for it the PONG would be silently dropped whenever slots ran out,
-            # causing the client's ping to time out. Reuse the most recent
-            # client icmp ident (cached on the session) for the reply, and use
-            # the PING's own icmp_seq (pong_icmp_seq) so the client can correlate
-            # each pending ping. Fall back to a real slot only if we have no
-            # client history at all.
-            client_icmp = session_stream.last_client_icmp
-            if client_icmp is None:
-                ident, seq = await session_stream.get_response_slot()
-            else:
-                ident = client_icmp[0]
-                seq = (
-                    pong_icmp_seq
-                    if pong_icmp_seq is not None
-                    else client_icmp[1]
-                )
-        else:
-            ident, seq = await session_stream.get_response_slot()
-        result = await super(ICMPTransportServerSocket, self).send(
-            session_stream.client_address[0],
-            msg_seq,
-            ack_num,
-            event,
-            session_stream.client_address[1],
-            session_stream.server_address[1],
-            buffer,
-            icmp_ident=ident,
-            icmp_seq=seq,
-            wait_for_ack=wait_for_ack,
-        )
-        # Any reply we send to the client (downlink data, PONG, ...) proves the
-        # channel is alive. The PONG path uses this to skip a redundant keepalive
-        # PONG when we've already replied with data in the pong window.
-        session_stream.last_reply_time = time.time()
-        return result
+        # Control packets (PONG/OK/CHAL/FAIL/RESET) have no pull semantics
+        # (doc 7.6): send them immediately, bound to the request that triggered
+        # them or to the most recent client request if none was supplied.
+        if event in (
+            ICMPTransportPacket.OP_PONG,
+            ICMPTransportPacket.OP_OK,
+            ICMPTransportPacket.OP_CHAL,
+            ICMPTransportPacket.OP_FAIL,
+            ICMPTransportPacket.OP_RESET,
+        ):
+            if icmp_ident is None or icmp_seq is None:
+                client_icmp = session_stream.last_client_icmp
+                if client_icmp is None:
+                    utils.logger.warning(
+                        "[%s] Drop control packet %s: no client icmp identity yet"
+                        % (
+                            self.__class__.__name__,
+                            ICMPTransportPacket.format_op(event),
+                        )
+                    )
+                    return
+                icmp_ident, icmp_seq = client_icmp
+            if event == ICMPTransportPacket.OP_PONG and pong_icmp_seq is not None:
+                icmp_seq = pong_icmp_seq
+            await self._send_reply(
+                session_stream, event, buffer, icmp_ident, icmp_seq, 0, False
+            )
+            return
+        # Downlink DATA is not sent immediately: it is enqueued and dispatched onto
+        # a client request by the per-request loop in ``listen`` (doc 5.3). This is
+        # what guarantees every client request receives exactly one reply.
+        session_stream.enqueue_downlink(event, buffer, wait_for_ack)
 
     async def send_message(self, session_stream, buffer):
         max_size = session_stream.max_data_size
@@ -1861,6 +2021,8 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
                 )
             )
         while offset < len(buffer):
+            # Enqueue only; the reply (and thus the downlink fragment) is actually
+            # sent by the per-request dispatch in ``listen`` (doc 5.3).
             await self.send(
                 session_stream,
                 ICMPTransportPacket.OP_DATA,
@@ -1988,10 +2150,6 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
             )
 
             if trans_packet.event == ICMPTransportPacket.OP_CONNECT:
-                utils.logger.info(
-                    "[%s] Received OP_CONNECT from %s:%d"
-                    % (self.__class__.__name__, addr, trans_packet.client_port)
-                )
                 # Parse per-session parameters from the CONNECT payload, a plain
                 # msgpack dict (keys: username, ping_timeout, mss). The server
                 # applies them to this session (PONG delay and max packet
@@ -2165,39 +2323,39 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
                     # they still consume a sequence number, so fill the gap.
                     session_stream.on_data_received(trans_packet.seq_num, b"")
 
-                if trans_packet.event == ICMPTransportPacket.OP_PING:
-                    utils.logger.info(
-                        "[%s] OP_PING from %s:%d ident=%d seq=%d -> reply PONG"
-                        % (
-                            self.__class__.__name__,
-                            addr,
-                            trans_packet.client_port,
-                            icmp_packet.ident,
-                            icmp_packet.sequence,
-                        )
-                    )
-                    # Reply with a PONG after the (per-server) ping_timeout. The
-                    # default ping_timeout is PING_INTERVAL (5s) so the server answers
-                    # every keepalive PING within one idle window. Some NAT/firewall
-                    # networks drop a 5s-delayed ICMP reply; lower it per-server via
-                    # the `ping_timeout` URL parameter (formerly `timeout` /
-                    # `pong_delay`), e.g. `icmp://0.0.0.0?ping_timeout=0.5`.
-                    utils.safe_ensure_future(
-                        session_stream.delay_ack(
-                            0,
-                            session_stream.ping_timeout,
-                            icmp_packet.sequence,
-                        )
-                    )
-                elif trans_packet.event == ICMPTransportPacket.OP_DATA:
-                    pass
-                elif trans_packet.event == ICMPTransportPacket.OP_AUTH:
+                if trans_packet.event == ICMPTransportPacket.OP_AUTH:
                     await self.handle_auth(session_stream, trans_packet)
-                else:
-                    utils.logger.warning(
-                        "[%s] Unexpected icmp transport packet, event=%s"
-                        % (self.__class__.__name__, ICMPTransportPacket.format_op(trans_packet.event))
+                    continue
+
+                # --- Per-request dispatch (doc 5.3): every client request gets
+                # exactly one reply. Branch priority: hole-fill (RTO-expired
+                # unacked downlink) > new downlink data > pure ACK. Idempotent
+                # replay of uplink is handled implicitly by the seq-based dedup in
+                # on_data_received (doc 5.2 / 5.6.1). ---
+                now = time.time()
+                # 1) release downlink fragments acknowledged by this request's ack
+                session_stream.release_downlink(trans_packet.ack_num, now)
+                rto = session_stream.current_rto()
+                payload, event, dl_seq, is_new = session_stream.pick_downlink_to_send(now, rto)
+                if payload is None:
+                    # No downlink data: reply with a pure ACK (an empty OP_DATA).
+                    # For an explicit keepalive PING with nothing to send, answer
+                    # with a PONG so the client's ping timer is satisfied.
+                    reply_event = (
+                        ICMPTransportPacket.OP_PONG
+                        if trans_packet.event == ICMPTransportPacket.OP_PING
+                        else ICMPTransportPacket.OP_DATA
                     )
+                    await self._send_reply(
+                        session_stream, reply_event, b"",
+                        icmp_packet.ident, icmp_packet.sequence, 0, False,
+                    )
+                else:
+                    await self._send_reply(
+                        session_stream, event, payload,
+                        icmp_packet.ident, icmp_packet.sequence, dl_seq, False,
+                    )
+                    session_stream.record_downlink_sent(dl_seq, payload, event, is_new, now)
 
 
 class StreamForwardPacket(object):
