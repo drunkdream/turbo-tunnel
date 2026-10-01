@@ -90,12 +90,19 @@ class ICMPPacket(object):
         return self._data
 
     def serialize(self):
-        buffer = struct.pack(
+        # The ICMP checksum must survive NAT, which rewrites the ident/seq
+        # header fields (and does NOT recompute the checksum). It must also
+        # stay meaningful: the payload (self._data) is an ICMPTransportPacket
+        # whose own checksum is self-complementary, so checksumming the whole
+        # payload would always yield 0. We therefore checksum the payload with
+        # the embedded transport checksum field (data[6:8]) zeroed out. This
+        # gives a non-zero, NAT-safe integrity check; the transport-layer
+        # checksum still covers the full payload independently.
+        header = struct.pack(
             "!BBHHH", self._type, self._code, 0, self._ident, self._seq
         )
-        buffer += self._data
-        checksum = utils.checksum(buffer)
-        return buffer[:2] + struct.pack("!H", checksum) + buffer[4:]
+        checksum = _icmp_payload_checksum(self._data)
+        return header[:2] + struct.pack("!H", checksum) + header[4:] + self._data
 
     @staticmethod
     def unserialize_from(buffer):
@@ -103,11 +110,29 @@ class ICMPPacket(object):
             raise utils.TunnelPacketError("Invalid ICMP packet: %r" % buffer)
         type, code, checksum, ident, seq = struct.unpack("!BBHHH", buffer[:8])
         data = buffer[8:]
-        if utils.checksum(buffer) != 0:
-            raise utils.TunnelPacketError(
-                "Invalid ICMP packet checksum: %.4x" % (checksum)
-            )
+        # NOTE: The ICMP-layer checksum is intentionally NOT validated here.
+        # The ICMP ident/seq header fields are routinely rewritten by NAT
+        # middleboxes *without* the checksum being recomputed, so any checksum
+        # that covers them is unusable across NAT (it would reject every
+        # NAT-traversed packet). Payload integrity is instead guaranteed by
+        # the transport-layer checksum carried inside ``data`` (which only
+        # covers the payload and is therefore NAT-transparent).
         return ICMPPacket(type, code, ident, seq, data)
+
+
+def _icmp_payload_checksum(data):
+    """ICMP-layer checksum over the payload, NAT-safe and non-degenerate.
+
+    Excludes the transport-layer checksum carried at data[6:8] (it is
+    self-complementary and would otherwise force the sum to 0), while the
+    ICMP ident/seq are excluded because NAT rewrites them without fixing
+    the checksum. The caller validates the ICMP header separately.
+    """
+    if len(data) >= 8:
+        buf = bytearray(data)
+        buf[6:8] = b"\x00\x00"
+        return utils.checksum(bytes(buf))
+    return utils.checksum(data)
 
 
 class ICMPProtocol(object):
@@ -331,10 +356,17 @@ class ICMPTransportPacket(object):
     OP_OK = 9             # success result (CONNECT or AUTH accepted)
     OP_FAIL = 10          # failure result (CONNECT or AUTH rejected)
 
-    # Maximum payload carried by a single packet. Sized to stay within the
-    # PPPoE MTU budget: 1492 - 20 (IP) - 8 (ICMP) - 18 (this header) = 1446,
-    # so 1440 leaves a small margin and avoids IP fragmentation.
-    MAX_DATA_SIZE = 1440
+    # Maximum payload carried by a single packet. The on-wire IP datagram is
+    # this payload plus 20 (IP) + 8 (ICMP) + 17 (transport header) = 45 bytes,
+    # so the value must leave enough room for paths whose MTU is lower than the
+    # nominal 1500. A raw socket only receives the *first* fragment of a
+    # fragmented datagram, so an oversized packet is silently truncated on the
+    # receive side instead of being reassembled. 1200 keeps the whole datagram
+    # at 1245 bytes, safely below the 1280-byte IPv6 minimum MTU and below the
+    # PPPoE/VPN budget, avoiding fragmentation on virtually every real path.
+    # Raise it explicitly via the ``mss`` URL parameter on links that are known
+    # to carry a full 1500-byte MTU.
+    MAX_DATA_SIZE = 1200
     # Lower bound for the configurable payload size. IPv4 only guarantees an
     # MTU of 576, minus 48 bytes of headers, so 512 still leaves headroom.
     MIN_DATA_SIZE = 512
@@ -1973,6 +2005,8 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
         msg_seq=None,
         wait_for_ack=True,
         pong_icmp_seq=None,
+        icmp_ident=None,
+        icmp_seq=None,
     ):
         # Control packets (PONG/OK/CHAL/FAIL/RESET) have no pull semantics
         # (doc 7.6): send them immediately, bound to the request that triggered

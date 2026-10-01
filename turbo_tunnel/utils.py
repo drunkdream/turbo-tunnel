@@ -29,15 +29,19 @@ default_resolve_file = "/etc/resolv.conf"
 
 
 def get_or_create_event_loop():
+    # asyncio.get_running_loop() only exists on Python 3.7+. On 3.6 fall
+    # back to get_event_loop() so the code runs on older interpreters too.
     try:
-        return asyncio.get_running_loop()
+        if hasattr(asyncio, "get_running_loop"):
+            return asyncio.get_running_loop()
     except RuntimeError:
-        try:
-            return asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            return loop
+        pass
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop
 
 def verbose_logging(msg):
     if logger.level < logging.DEBUG:
@@ -603,13 +607,16 @@ async def _resolve(resolver, name_server, domain, queue):
                 return
 
 
-async def resolve_address(address):
+async def resolve_address(address, name_servers=None):
     if not is_ip_address(address[0]):
+        # The cache key must include the nameservers so that a result resolved
+        # with tunnel-specific DNS is not returned for a plain global resolve.
+        cache_key = (address, tuple(name_servers) if name_servers else None)
         if (
-            address in resolve_cache
-            and time.time() - resolve_cache[address]["time"] <= resovle_timeout
+            cache_key in resolve_cache
+            and time.time() - resolve_cache[cache_key]["time"] <= resovle_timeout
         ):
-            return resolve_cache[address]["result"]
+            return resolve_cache[cache_key]["result"]
         domain_list = [address[0]]
         if domain_suffixes and not is_public_domain(address[0]):
             for suffix in domain_suffixes:
@@ -620,6 +627,9 @@ async def resolve_address(address):
         result = address
         tasks = []
         queue = asyncio.Queue()
+
+        if name_servers is None:
+            name_servers = globals()["name_servers"]
 
         for name_server in name_servers:
             for domain in domain_list:
@@ -645,7 +655,7 @@ async def resolve_address(address):
                 break
 
         if is_ip_address(result[0]):
-            resolve_cache[address] = {"time": time.time(), "result": result}
+            resolve_cache[cache_key] = {"time": time.time(), "result": result}
         return result
 
     return address
