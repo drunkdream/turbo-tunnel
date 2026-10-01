@@ -1031,6 +1031,14 @@ class ICMPTransportSocket(object):
     MAX_WINDOW_SIZE = 5
     ACK_TIMEOUT = 2
     SEND_TIMEOUT = 60
+    # Safety valve for an unacknowledged stream packet. A packet whose peer
+    # stream has been torn down will never be acked; without a bound it would
+    # occupy a send-window slot forever and eventually starve all new traffic on
+    # the shared ICMP session. These are deliberately generous (high loss links
+    # need many retries) -- they exist only to break a permanent stall, not to
+    # give up on a live transfer.
+    MAX_RETRIES = 30
+    MAX_RETRANSMIT_TIME = 30.0
 
     PING_INTERVAL = 5
     PING_TIMEOUT = 30
@@ -1089,6 +1097,7 @@ class ICMPTransportSocket(object):
                 "address": address,
                 "msg_seq": msg_seq,
                 "timestamp": 0,
+                "first_send_time": 0,
                 "buffer": buffer,
                 "icmp_type": icmp_type,
                 "icmp_code": icmp_code,
@@ -1216,6 +1225,31 @@ class ICMPTransportSocket(object):
                     # that will never be acked.
                     self._sending_buffers.remove(message)
                     break
+                if message["wait_for_ack"] and message["count"] > 0:
+                    # A message that keeps being retransmitted but is never acked
+                    # (e.g. its peer stream was already torn down) would otherwise
+                    # pin this send-window slot forever, permanently starving new
+                    # packets once the window fills. Give up after MAX_RETRIES and
+                    # release the slot, mirroring TCP's retransmission limit.
+                    if (
+                        message["count"] >= self.__class__.MAX_RETRIES
+                        or time.time() - message["first_send_time"]
+                        >= self.__class__.MAX_RETRANSMIT_TIME
+                    ):
+                        utils.logger.warning(
+                            "[%s] Give up message %d to %s after %d retries "
+                            "(%.1fs), releasing send window slot"
+                            % (
+                                self.__class__.__name__,
+                                message["msg_seq"],
+                                message["address"][0],
+                                message["count"],
+                                time.time() - message["first_send_time"],
+                            )
+                        )
+                        self._sending_buffers.remove(message)
+                        self._unack_packets = max(0, self._unack_packets - 1)
+                        break
                 if (
                     message["priority"] == 0
                     and message["count"] == 0
@@ -1260,6 +1294,7 @@ class ICMPTransportSocket(object):
                         # Only the first transmission occupies the send window;
                         # counting retransmissions would inflate it permanently.
                         self._unack_packets += 1
+                        message["first_send_time"] = message["timestamp"]
                     message["count"] += 1
                 else:
                     self._sending_buffers.remove(message)
@@ -2453,10 +2488,12 @@ class StreamForwardPacket(object):
 class CreateStreamPacket(StreamForwardPacket):
     """Create Stream Packet"""
 
-    def __init__(self, target_address, result=None):
+    def __init__(self, target_address, result=None, token=None):
         kwargs = {"target_address": target_address}
         if result is not None:
             kwargs["result"] = result
+        if token is not None:
+            kwargs["token"] = token
         super(CreateStreamPacket, self).__init__(self.__class__.EVENT_CREATE, **kwargs)
 
     @property
@@ -2470,6 +2507,22 @@ class CreateStreamPacket(StreamForwardPacket):
     @result.setter
     def result(self, value):
         self._kwargs["result"] = value
+
+    @property
+    def token(self):
+        """Per-request correlation token.
+
+        The client stamps every CREATE with a unique token and the server echoes
+        it back in the reply. This lets the client match the reply to *its own*
+        request even when a previous, timed-out request's delayed reply arrives
+        on the shared session (which would otherwise be mistaken for the
+        current request's result and hand out a stale, already-closed stream).
+        """
+        return self._kwargs.get("token")
+
+    @token.setter
+    def token(self, value):
+        self._kwargs["token"] = value
 
 
 class WriteStreamPacket(StreamForwardPacket):
@@ -2507,9 +2560,14 @@ class ICMPTunnelStreamManager(object):
     def get_stream(self, stream_id):
         return self._streams.get(stream_id)
 
-    async def wait_for_stream(self, address, timeout=10):
+    async def wait_for_stream(self, token, timeout=10):
+        """Wait for the CREATE reply carrying ``token``.
+
+        Matching is by the per-request token rather than by host:port, so a
+        delayed reply for an earlier (abandoned) request can never be mistaken
+        for this one.
+        """
         time0 = time.time()
-        key = "%s:%d" % address
         while time.time() - time0 < timeout:
             if not self._running:
                 utils.logger.warning(
@@ -2523,12 +2581,13 @@ class ICMPTunnelStreamManager(object):
                     )
                 )
                 return -1
-            if key in self._streams:
-                return self._streams.pop(key)
+            if token in self._streams:
+                return self._streams.pop(token)
             await self._event.wait()
             self._event.clear()
         utils.logger.warning(
-            "[%s] Wait for stream %s complete timeout" % (self.__class__.__name__, key)
+            "[%s] Wait for stream token=%s complete timeout"
+            % (self.__class__.__name__, token)
         )
         return -1
 
@@ -2538,7 +2597,7 @@ class ICMPTunnelStreamManager(object):
         self._streams[stream_id] = ICMPTunnelStream(stream_id, self._session_stream)
         return self._streams[stream_id]
 
-    async def create_stream(self, target_address):
+    async def create_stream(self, target_address, token=None):
         raise NotImplementedError()
 
     async def handle_session_stream(self):
@@ -2576,21 +2635,28 @@ class ICMPTunnelStreamManager(object):
             if stream_packet.event == StreamForwardPacket.EVENT_CREATE:
                 target_address = tuple(stream_packet.target_address)
                 if self._server_side:
-                    utils.safe_ensure_future(self.create_stream(target_address))
+                    utils.safe_ensure_future(self.create_stream(target_address, stream_packet.token))
                 else:
                     stream_id = stream_packet.result
-                    self._streams["%s:%s" % target_address] = stream_id
+                    token = stream_packet.token
+                    # Key the pending result by the request token (not by
+                    # host:port, which is shared across requests and can be
+                    # poisoned by a previous request's delayed reply).
+                    if token is not None:
+                        self._streams[token] = stream_id
                     utils.logger.info(
-                        "[%s] Connect to %s:%d %s, stream_id is %d"
+                        "[%s] Connect to %s:%d %s, stream_id is %d, token=%s"
                         % (
                             self.__class__.__name__,
                             target_address[0],
                             target_address[1],
                             "success" if stream_id > 0 else "failed",
                             stream_id,
+                            token,
                         )
                     )
-                    self.add_stream(stream_id)
+                    if stream_id > 0:
+                        self.add_stream(stream_id)
                     self._event.set()
                 continue
             stream = self._streams.get(stream_packet.stream_id)
@@ -2718,7 +2784,10 @@ class ICMPTunnel(tunnel.Tunnel):
             self.__class__.stream_managers[key] = stream_manager
         elif self._sock.status == ICMPTransportSocket.STATUS_CONNECTING:
             raise NotImplementedError(self._sock.status)
-        stream_packet = CreateStreamPacket((self._addr, self._port))
+        # Stamp this CREATE with a unique token so its reply can be matched
+        # unambiguously, even if a previous request's reply arrives late.
+        token = random.randint(1, pow(2, 32) - 1)
+        stream_packet = CreateStreamPacket((self._addr, self._port), token=token)
         await self._sock.session_stream.write(stream_packet.serialize())
         if key not in self.__class__.stream_managers:
             utils.logger.error(
@@ -2726,7 +2795,7 @@ class ICMPTunnel(tunnel.Tunnel):
             )
             return False
         stream_manager = self.__class__.stream_managers[key]
-        stream_id = await stream_manager.wait_for_stream((self._addr, self._port))
+        stream_id = await stream_manager.wait_for_stream(token)
         if stream_id > 0:
             self._stream = stream_manager.get_stream(stream_id)
             return True
@@ -2774,8 +2843,8 @@ class ICMPTunnelServer(server.TunnelServer):
         )
 
         class ICMPTunnelServerStreamManager(ICMPTunnelStreamManager):
-            async def create_stream(self, target_address):
-                stream_packet = CreateStreamPacket(target_address)
+            async def create_stream(self, target_address, token=None):
+                stream_packet = CreateStreamPacket(target_address, token=token)
                 with server.TunnelConnection(
                     self._session_stream.client_address,
                     target_address,
@@ -2800,8 +2869,12 @@ class ICMPTunnelServer(server.TunnelServer):
                         else:
                             stream_id = random.randint(1, pow(2, 32) - 1)
                             stream_packet.result = stream_id
-                            await self._session_stream.write(stream_packet.serialize())
+                            # Register the stream BEFORE announcing its id to the
+                            # client: otherwise the client may answer the CREATE
+                            # reply with a WRITE that reaches us before the stream
+                            # exists, and it would be dropped as "Unexpected".
                             stream = self.add_stream(stream_id)
+                            await self._session_stream.write(stream_packet.serialize())
                             tasks = [
                                 this.forward_data_to_upstream(
                                     tun_conn, stream, tunnel_chain.tail
