@@ -1028,7 +1028,12 @@ class SessionStreamManager(object):
 
 class ICMPTransportSocket(object):
 
-    MAX_WINDOW_SIZE = 5
+    # Send window: how many unacknowledged packets may be in flight. In the pull
+    # model the client keeps multiple requests outstanding to give the server
+    # slots to piggyback downlink data on, so the window has to be at least as
+    # large as the request concurrency, otherwise requests get throttled and
+    # downlink throughput collapses.
+    MAX_WINDOW_SIZE = 32
     ACK_TIMEOUT = 2
     SEND_TIMEOUT = 60
     # Safety valve for an unacknowledged stream packet. A packet whose peer
@@ -1372,7 +1377,12 @@ class ICMPTransportSocket(object):
 class ICMPTransportClientSocket(ICMPTransportSocket):
     """ICMP Transport CLient Socket"""
 
-    MAX_PING_CONCURRENCY = 3
+    # Number of outstanding probe requests the client keeps in flight. In the
+    # pull model every client request lets the server piggyback exactly one
+    # downlink fragment, so this is the primary knob for downlink throughput:
+    # throughput ~= MAX_PING_CONCURRENCY * mss / request_interval. Keep it large
+    # enough that a full window of requests is always pending while data flows.
+    MAX_PING_CONCURRENCY = 20
     MAX_SENT_REQUESTS = 8192
     # How long _send_close waits for the OP_CLOSE to actually leave the
     # sending queue before giving up.
@@ -2550,6 +2560,12 @@ class ICMPTunnelStreamManager(object):
         self._session_stream = session_stream
         self._server_side = server_side
         self._streams = {}
+        # token -> Future waiting for that CREATE's reply. Using one Future per
+        # request avoids the lost-wakeup race of a shared Event: with an Event,
+        # a reply that arrives between wait() returning and clear() has its
+        # signal swallowed, and the waiter then blocks until it times out even
+        # though the reply already landed.
+        self._pending = {}
         self._event = asyncio.Event()
         self._running = True
 
@@ -2565,10 +2581,16 @@ class ICMPTunnelStreamManager(object):
 
         Matching is by the per-request token rather than by host:port, so a
         delayed reply for an earlier (abandoned) request can never be mistaken
-        for this one.
+        for this one. Each request gets its own Future, so a reply cannot be
+        lost to a shared-signal race.
         """
-        time0 = time.time()
-        while time.time() - time0 < timeout:
+        loop = utils.get_or_create_event_loop()
+        fut = loop.create_future()
+        self._pending[token] = fut
+        try:
+            return await asyncio.wait_for(asyncio.shield(fut), timeout)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            self._pending.pop(token, None)
             if not self._running:
                 utils.logger.warning(
                     "[%s] Session stream %s:%d => %s:%d closed"
@@ -2580,16 +2602,20 @@ class ICMPTunnelStreamManager(object):
                         self._session_stream.server_address[1],
                     )
                 )
-                return -1
-            if token in self._streams:
-                return self._streams.pop(token)
-            await self._event.wait()
-            self._event.clear()
-        utils.logger.warning(
-            "[%s] Wait for stream token=%s complete timeout"
-            % (self.__class__.__name__, token)
-        )
-        return -1
+            else:
+                utils.logger.warning(
+                    "[%s] Wait for stream token=%s complete timeout"
+                    % (self.__class__.__name__, token)
+                )
+            return -1
+
+    def resolve_stream(self, token, stream_id):
+        """Deliver a CREATE reply to whoever is waiting for ``token``."""
+        fut = self._pending.pop(token, None)
+        if fut is not None and not fut.done():
+            fut.set_result(stream_id)
+            return True
+        return False
 
     def add_stream(self, stream_id):
         assert stream_id not in self._streams
@@ -2639,11 +2665,6 @@ class ICMPTunnelStreamManager(object):
                 else:
                     stream_id = stream_packet.result
                     token = stream_packet.token
-                    # Key the pending result by the request token (not by
-                    # host:port, which is shared across requests and can be
-                    # poisoned by a previous request's delayed reply).
-                    if token is not None:
-                        self._streams[token] = stream_id
                     utils.logger.info(
                         "[%s] Connect to %s:%d %s, stream_id is %d, token=%s"
                         % (
@@ -2657,6 +2678,9 @@ class ICMPTunnelStreamManager(object):
                     )
                     if stream_id > 0:
                         self.add_stream(stream_id)
+                    # Hand the result to the exact request that asked for it.
+                    if token is not None:
+                        self.resolve_stream(token, stream_id)
                     self._event.set()
                 continue
             stream = self._streams.get(stream_packet.stream_id)
