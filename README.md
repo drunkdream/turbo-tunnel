@@ -148,6 +148,12 @@ tunnels:
   - id: private
     url: wss://test:mypassword@ws-proxy.com/proxy/{addr}/{port}
     dependency: web # Depend web tunnel
+    # Optional: use the specified nameservers to resolve target domains when
+    # this tunnel is selected. Accepts a single server, a semicolon-separated
+    # list, or a YAML list. Leave unset to use the system/default resolvers.
+    # Protocol prefixes are supported: udp:// (default), tcp://, tcps:// (DNS
+    # over TLS) and https:// (DNS over HTTPS, the path is the DoH endpoint).
+    nameserver: tcp://8.8.8.8;https://dns.google/dns-query
 
 rules:
   - id: local

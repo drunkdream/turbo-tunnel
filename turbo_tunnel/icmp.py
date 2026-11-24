@@ -557,7 +557,6 @@ class ICMPSessionStream(object):
         self._seq = 0
         self._last_seq = 0
         self._last_send_ack = 0
-        self._recv_seqs = []
         self._response_slots = []
         self._recving_buffers = {}
         self._recv_buffer = b""
@@ -643,13 +642,16 @@ class ICMPSessionStream(object):
 
     @property
     def next_ack(self):
-        if len(self._recv_seqs) > 1:
-            min_seq = min(self._recv_seqs)
-            while (min_seq + 1) in self._recv_seqs:
-                self._recv_seqs.remove(min_seq)
-                min_seq += 1
-            assert self._recv_seqs
-        return self._recv_seqs[0] if self._recv_seqs else 0
+        # The cumulative ACK must be the highest consecutively delivered
+        # sequence, which is exactly ``_last_seq`` (updated only by
+        # ``on_data_received`` as the reorder buffer drains). Deriving it from
+        # ``_recv_seqs`` is unsafe: that list is mutated by next_ack itself, and
+        # a retransmitted old fragment re-enters it on the wire, which can drag
+        # the ACK *backwards*. A regressed ACK makes the peer release
+        # fragments we never received and stop hole-filling the real gap --
+        # observed as a permanent stall with heavy retransmission on lossy
+        # public links.
+        return self._last_seq
 
     @property
     def last_alive_time(self):
@@ -672,13 +674,21 @@ class ICMPSessionStream(object):
         self._recv_event.set()
 
     async def read(self):
-        if not self._recv_buffer:
-            await self._recv_event.wait()
+        # Keep the event and the buffer state in sync. Previously a read that
+        # found data already buffered returned it without clearing the event;
+        # the next read then woke immediately on the stale event and returned
+        # an empty buffer, while a fragment arriving in that window could be
+        # left in the buffer with its wakeup cleared -- silently losing data.
+        while not self._recv_buffer:
+            if self._status == ICMPTransportSocket.STATUS_DISCONNECT:
+                raise utils.TunnelClosedError()
             self._recv_event.clear()
+            await self._recv_event.wait()
         if self._status == ICMPTransportSocket.STATUS_DISCONNECT:
             raise utils.TunnelClosedError()
         buffer = self._recv_buffer
         self._recv_buffer = b""
+        self._recv_event.clear()
         return buffer
 
     async def write(self, buffer):
@@ -704,10 +714,22 @@ class ICMPSessionStream(object):
         self._last_alive_time = time.time()
         seq_num = trans_packet.seq_num
         ack_num = trans_packet.ack_num
-        if seq_num > 0 and seq_num not in self._recv_seqs:
-            self._recv_seqs.append(seq_num)
-            if len(self._recv_seqs) > 1:
-                self._recv_seqs.sort()
+        if (
+            self._server_side
+            and seq_num == 0
+            and trans_packet.event == ICMPTransportPacket.OP_PING
+            and trans_packet.padding
+        ):
+            # Pull requests (msg_seq=0 PING) piggyback a selective ACK of the
+            # out-of-order downlink fragments the client already holds. Free
+            # those now so hole-fill targets only the genuine missing pieces.
+            try:
+                payload = _unpack_msgpack_payload(trans_packet.padding)
+                sack = payload.get("sack") if isinstance(payload, dict) else None
+                if isinstance(sack, list):
+                    self.release_downlink_sack(sack)
+            except utils.TunnelPacketError:
+                pass
         self._sock.on_ack_received(
             self._client_address if self._server_side else self._server_address, ack_num
         )
@@ -939,6 +961,27 @@ class ICMPSessionStream(object):
                     self.rtt_sample(now - sent_time)
         if ack > self._downlink_last_ack:
             self._downlink_last_ack = ack
+
+    @property
+    def sack_list(self):
+        """Out-of-order downlink fragments buffered but not yet deliverable.
+
+        These are carried to the peer as a selective ACK so it can stop
+        retransmitting them while it fills the real gap blocking delivery.
+        """
+        return sorted(self._recving_buffers.keys())
+
+    def release_downlink_sack(self, seq_list):
+        """Free downlink fragments the client reported via selective ACK."""
+        if not seq_list:
+            return
+        now = time.time()
+        for seq in seq_list:
+            entry = self._downlink_unacked.pop(seq, None)
+            if entry is not None:
+                _payload, _event, sent_time, _retry = entry
+                if sent_time:
+                    self.rtt_sample(now - sent_time)
 
     def rtt_sample(self, rtt):
         if rtt <= 0:
@@ -1813,6 +1856,20 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
         else:
             return False
 
+    @classmethod
+    def adjust_ping_concurrency(cls, current, waiting_time, minimum=1):
+        """Adjust pull concurrency from the time since last downlink data.
+
+        Data flowing -> use the full window immediately; a brief quiet period
+        (normal DATA RTT on lossy links is 1-2s) keeps the window; a long idle
+        period decays it proportionally instead of collapsing it.
+        """
+        if waiting_time < 0.2:
+            return cls.MAX_PING_CONCURRENCY
+        if waiting_time > 2.0:
+            return max(minimum, int(current * 0.75))
+        return current
+
     async def ping_task(self):
         min_ping_concurrency = 1
         ping_concurrency = min_ping_concurrency
@@ -1830,7 +1887,9 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                     ICMPTransportPacket.OP_PING,
                     msg_seq=0,
                     wait_for_ack=False,
-                    buffer=_pack_msgpack_payload({}),
+                    buffer=_pack_msgpack_payload(
+                        {"sack": self._session_stream.sack_list}
+                    ),
                 )
                 last_ping_time = time.time()
 
@@ -1864,20 +1923,15 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                     break
 
             waiting_time = time.time() - self._session_stream.last_data_time
-            if waiting_time < 0.2:
-                if ping_concurrency < self.__class__.MAX_PING_CONCURRENCY:
-                    ping_concurrency += 1
-                    utils.logger.debug(
-                        "[%s] Ping concurrency changed to %d"
-                        % (self.__class__.__name__, ping_concurrency)
-                    )
-            elif waiting_time > 0.5:
-                if ping_concurrency > min_ping_concurrency:
-                    ping_concurrency -= 1
-                    utils.logger.debug(
-                        "[%s] Ping concurrency changed to %d"
-                        % (self.__class__.__name__, ping_concurrency)
-                    )
+            new_concurrency = self.adjust_ping_concurrency(
+                ping_concurrency, waiting_time, min_ping_concurrency
+            )
+            if new_concurrency != ping_concurrency:
+                utils.logger.debug(
+                    "[%s] Ping concurrency changed to %d"
+                    % (self.__class__.__name__, new_concurrency)
+                )
+                ping_concurrency = new_concurrency
 
             current_pings = self._current_pings
             if len(current_pings) < ping_concurrency:
@@ -1898,7 +1952,9 @@ class ICMPTransportClientSocket(ICMPTransportSocket):
                             ICMPTransportPacket.OP_PING,
                             msg_seq=0,
                             wait_for_ack=False,
-                            buffer=_pack_msgpack_payload({}),
+                            buffer=_pack_msgpack_payload(
+                                {"sack": self._session_stream.sack_list}
+                            ),
                         )
                         last_ping_time = time.time()
 
@@ -2333,12 +2389,21 @@ class ICMPTransportServerSocket(ICMPTransportSocket):
                         )
                         session_stream.status = ICMPTransportSocket.STATUS_ESTABLISHED
                 else:
-                    utils.safe_ensure_future(
-                        self.send(
-                            session_stream,
-                            ICMPTransportPacket.OP_FAIL,
-                            buffer=_pack_msgpack_payload({}),
+                    # A duplicate CONNECT is a retransmission of the handshake
+                    # whose OK/CHAL was lost on the wire (common on lossy public
+                    # links). Re-sending FAIL would make the client give up on a
+                    # perfectly good session. Echo the current handshake reply
+                    # instead, without starting a second stream handler.
+                    if self._auth and self._auth[1] and session_stream.auth_nonce:
+                        reply_event = ICMPTransportPacket.OP_CHAL
+                        reply_payload = _pack_msgpack_payload(
+                            {"nonce": session_stream.auth_nonce}
                         )
+                    else:
+                        reply_event = ICMPTransportPacket.OP_OK
+                        reply_payload = _pack_msgpack_payload({})
+                    utils.safe_ensure_future(
+                        self.send(session_stream, reply_event, buffer=reply_payload)
                     )
                     session_stream.status = ICMPTransportSocket.STATUS_DISCONNECT
             else:
@@ -2629,16 +2694,28 @@ class ICMPTunnelStreamManager(object):
     async def handle_session_stream(self):
         buffer = b""
         while self._running:
-            try:
-                buffer += await self._session_stream.read()
-            except utils.TunnelClosedError:
-                self._running = False
-                self._event.set()
-                break
+            # Only block on the session when there is not already a complete
+            # frame buffered. A single session read can carry many stream
+            # frames; reading unconditionally each iteration left all but the
+            # first frame stranded in ``buffer`` until the next packet arrived,
+            # which stalled large transfers even though the bytes were already
+            # received.
             if len(buffer) < 5:
+                try:
+                    buffer += await self._session_stream.read()
+                except utils.TunnelClosedError:
+                    self._running = False
+                    self._event.set()
+                    break
                 continue
             buffer_len = struct.unpack("!I", buffer[:4])[0]
             if len(buffer) < buffer_len + 4:
+                try:
+                    buffer += await self._session_stream.read()
+                except utils.TunnelClosedError:
+                    self._running = False
+                    self._event.set()
+                    break
                 continue
             buff = buffer[: buffer_len + 4]
             buffer = buffer[buffer_len + 4 :]
@@ -2728,16 +2805,19 @@ class ICMPTunnelStream(object):
 
     def on_close(self):
         self._running = False
+        # Wake a reader so it can drain buffered data before observing close.
+        self._event.set()
 
     async def read(self):
-        while self._running:
+        while True:
             if self._buffer:
                 buffer = self._buffer
                 self._buffer = b""
                 return buffer
-            await self._event.wait()
+            if not self._running:
+                raise utils.TunnelClosedError()
             self._event.clear()
-        raise utils.TunnelClosedError()
+            await self._event.wait()
 
     async def write(self, buffer):
         stream_packet = WriteStreamPacket(self._stream_id, buffer)

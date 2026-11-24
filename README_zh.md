@@ -142,6 +142,12 @@ tunnels:
   - id: private
     url: wss://test:mypassword@ws-proxy.com/proxy/{addr}/{port}
     dependency: web # 依赖web代理
+    # 可选：当该隧道被选中时，使用指定的 nameserver 解析目标域名。
+    # 可填单个地址、分号分隔的多个地址，或 YAML 列表。
+    # 不填则使用系统/默认 DNS。
+    # 支持协议前缀：udp://（默认）、tcp://、tcps://（DNS over TLS）、
+    # https://（DNS over HTTPS，path 为 DoH 接口路径）。
+    nameserver: tcp://8.8.8.8;https://dns.google/dns-query
 
 rules:
   - id: local
