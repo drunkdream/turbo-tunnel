@@ -35,6 +35,8 @@ skip_reason = "Requires Linux and root privileges (sudo)"
 
 @pytest.mark.skipif(skip_root_tests, reason=skip_reason)
 def setup_module(module):
+    if skip_root_tests:
+        return
     with open(disable_ping_file, "w") as fp:
         fp.write("1")
 
@@ -53,6 +55,8 @@ def setup_module(module):
 
 @pytest.mark.skipif(skip_root_tests, reason=skip_reason)
 def teardown_module(module):
+    if skip_root_tests:
+        return
     with open(disable_ping_file, "w") as fp:
         fp.write("0")
     print(exec_command("ip link delete veth1"))
