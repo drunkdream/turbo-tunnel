@@ -13,7 +13,7 @@
 ## 环境要求
 
 - 操作系统： `Windows`、`Linux`、`MacOS`
-- Python: `>=3.5`
+- Python: `>=3.6`
 
 ## 主要功能
 
