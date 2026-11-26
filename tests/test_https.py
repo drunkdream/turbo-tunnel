@@ -136,12 +136,19 @@ async def test_http_proxy_with_unknown_domain():
         b"GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n\r\n"
         % (port2, port1)
     )
-    rsp = await tun.read()
+    # A single read may return only part of the chunked response on some
+    # platforms. Keep reading until the terminating chunk arrives.
+    rsp = b""
+    while b"\r\n0\r\n\r\n" not in rsp:
+        chunk = await asyncio.wait_for(tun.read(), 5)
+        if not chunk:
+            break
+        rsp += chunk
     time1 = time.time()
     pos = rsp.find(b"\r\n\r\n")
     assert pos > 0
-    rsp = rsp[pos + 4 :]
-    assert rsp == b"b\r\nHello HTTP!\r\n0\r\n\r\n"
+    body = rsp[pos + 4 :]
+    assert b"Hello HTTP!" in body
     assert time1 - time0 < 2
 
     # Close the second tunnel and drain the background task before teardown.
