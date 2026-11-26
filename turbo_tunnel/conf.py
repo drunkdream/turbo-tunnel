@@ -18,6 +18,13 @@ class Tunnel(object):
         self._url = utils.Url(tunnel["url"])
         self._is_default = tunnel.get("default", False)
         self._dependency = tunnel.get("dependency", None)
+        nameserver = tunnel.get("nameserver", None)
+        if nameserver is None:
+            self._nameservers = []
+        elif isinstance(nameserver, str):
+            self._nameservers = [ns.strip() for ns in nameserver.split(";") if ns.strip()]
+        else:
+            self._nameservers = list(nameserver)
 
     def __eq__(self, other):
         if not other or not isinstance(other, Tunnel):
@@ -52,6 +59,10 @@ class Tunnel(object):
     @dependency.setter
     def dependency(self, value):
         self._dependency = value
+
+    @property
+    def nameservers(self):
+        return self._nameservers
 
     def is_default(self):
         return self._is_default

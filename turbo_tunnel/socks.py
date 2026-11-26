@@ -700,7 +700,14 @@ class Socks5TunnelServer(server.TCPTunnelServer):
         buffer = await downstream.read()
         connect_request = Socks5ConnectRequestPacket.unserialize_from(buffer)
         target_address = connect_request.address
-        resolved_target_address = await utils.resolve_address(target_address)
+        # Prefer the tunnel router's resolution so that any tunnel-specific
+        # nameservers configured for the matched tunnel take effect. The actual
+        # connection built by the tunnel chain re-resolves the target with the
+        # egress tunnel's nameservers as well.
+        if self._tunnel_router:
+            resolved_target_address = await self._tunnel_router.resolve(target_address)
+        else:
+            resolved_target_address = await utils.resolve_address(target_address)
         if resolved_target_address[0] == target_address[0]:
             resolved_target_address = ("255.255.255.255", resolved_target_address[1])
 

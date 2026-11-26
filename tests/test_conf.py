@@ -24,6 +24,48 @@ def test_tunnel():
     assert tunnel.dependency.id == "web"
     assert tunnel.is_default() == True
     assert tunnel.is_blocked() == False
+    assert tunnel.nameservers == []
+
+
+def test_tunnel_nameserver():
+    tunnel = conf.Tunnel(
+        {
+            "id": "test",
+            "url": "socks://:1024",
+            "nameserver": "8.8.8.8;1.1.1.1",
+        }
+    )
+    assert tunnel.nameservers == ["8.8.8.8", "1.1.1.1"]
+
+    tunnel = conf.Tunnel(
+        {
+            "id": "test",
+            "url": "socks://:1024",
+            "nameserver": ["8.8.8.8", "1.1.1.1"],
+        }
+    )
+    assert tunnel.nameservers == ["8.8.8.8", "1.1.1.1"]
+
+
+def test_tunnel_nameserver_protocols():
+    # Protocol prefixes must be preserved so users can choose udp/tcp/tcps/doh.
+    tunnel = conf.Tunnel(
+        {
+            "id": "test",
+            "url": "socks://:1024",
+            "nameserver": "tcp://8.8.8.8;https://dns.google/dns-query",
+        }
+    )
+    assert tunnel.nameservers == ["tcp://8.8.8.8", "https://dns.google/dns-query"]
+
+    tunnel = conf.Tunnel(
+        {
+            "id": "test",
+            "url": "socks://:1024",
+            "nameserver": ["tcps://1.1.1.1", "udp://8.8.4.4"],
+        }
+    )
+    assert tunnel.nameservers == ["tcps://1.1.1.1", "udp://8.8.4.4"]
 
 
 async def test_tunnel_rule():

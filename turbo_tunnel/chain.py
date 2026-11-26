@@ -200,7 +200,14 @@ class TunnelChain(object):
 
         if cached_tunnel_index < 0:
             if self._tunnel_router:
-                tunnel_address = await self._tunnel_router.resolve(tunnel_address)
+                name_servers = None
+                if isinstance(self._tunnel_router, route.TunnelRouter) and tunnel_urls:
+                    name_servers = self._tunnel_router.nameservers_for_url(
+                        tunnel_urls[0]
+                    )
+                tunnel_address = await self._tunnel_router.resolve(
+                    tunnel_address, name_servers
+                )
             if tunnel_urls[0].protocol == "icmp":
                 tunn = None
             else:
@@ -251,7 +258,12 @@ class TunnelChain(object):
                 self._tunnel_router
                 and url.params.get("server_resolve", "false") != "true"
             ):
-                next_address = await self._tunnel_router.resolve(next_address)
+                name_servers = None
+                if isinstance(self._tunnel_router, route.TunnelRouter):
+                    name_servers = self._tunnel_router.nameservers_for_url(url)
+                next_address = await self._tunnel_router.resolve(
+                    next_address, name_servers
+                )
 
             tunn = tunnel_class(tunn, url, next_address)
             self._tunnel_list.append(tunn)

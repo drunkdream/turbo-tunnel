@@ -310,7 +310,7 @@ class TerminalTable(object):
     def render_text(self, text, line, column, color=None):
         if line >= self._view.height:
             return
-        if color:
+        if color and utils.color_enabled():
             text = color + text + "\x1b[0m"
         self._view.write_buffer(text, (column, line), auto_wrap=False)
 
@@ -497,7 +497,8 @@ class TerminalPlugin(Plugin):
         )
         self._origin_stdout, self._origin_stderr = self._patch_output(self._log_view)
         self._term_tab = TerminalTable(
-            "\x1b[36m%s \x1b[32mv%s\x1b[0m" % (BANNER.lstrip("\n").rstrip(), VERSION),
+            ("\x1b[36m%s \x1b[32mv%s\x1b[0m" if utils.color_enabled() else "%s v%s")
+            % (BANNER.lstrip("\n").rstrip(), VERSION),
             [
                 {
                     "title": "Source Address",
@@ -614,10 +615,12 @@ class TerminalPlugin(Plugin):
                     conn.bytes_recv,
                 ]
                 if not conn in prev_conns:
-                    data.append(self.conn_opened_color)
+                    if utils.color_enabled():
+                        data.append(self.conn_opened_color)
                     prev_conns.append(conn)
                 elif conn.end_time:
-                    data.append(self.conn_closed_color)
+                    if utils.color_enabled():
+                        data.append(self.conn_closed_color)
                     closed_conns.append(conn)
 
                 data_table.append(data)

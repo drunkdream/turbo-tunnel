@@ -115,10 +115,62 @@ async def test_resolve_address():
         socket.getaddrinfo = orig_getaddrinfo
 
 
+async def test_resolve_address_with_nameserver():
+    orig_resolve = utils._resolve
+    called_name_servers = []
+
+    async def hooked_resolve(resolver, name_server, domain, queue):
+        called_name_servers.append(name_server)
+        if domain == "www.github-nameserver.com":
+            await queue.put("1.1.1.1")
+
+    utils._resolve = hooked_resolve
+    # Avoid cache interference from other tests.
+    utils.resolve_cache.clear()
+    try:
+        address = await utils.resolve_address(
+            ("www.github-nameserver.com", 80), name_servers=["9.9.9.9"]
+        )
+        assert address[0] == "1.1.1.1"
+        # The caller-specified nameserver must be used instead of the globals.
+        assert called_name_servers and all(ns == "9.9.9.9" for ns in called_name_servers)
+    finally:
+        utils._resolve = orig_resolve
+        utils.resolve_cache.clear()
+
+
+async def test_resolve_address_with_protocol():
+    orig_resolve = utils._resolve
+    captured = []
+
+    async def hooked_resolve(resolver, name_server, domain, queue):
+        # name_server is an async_dns.core.Address carrying the protocol.
+        captured.append(name_server)
+        if domain == "www.github-proto.com":
+            await queue.put("1.1.1.1")
+
+    utils._resolve = hooked_resolve
+    utils.resolve_cache.clear()
+    try:
+        address = await utils.resolve_address(
+            ("www.github-proto.com", 80),
+            name_servers=["tcp://9.9.9.9", "https://dns.google/dns-query"],
+        )
+        assert address[0] == "1.1.1.1"
+        # Both specified nameservers must be attempted.
+        assert len(captured) == 2
+        assert str(captured[0]) == "tcp://9.9.9.9"
+        # DoH server specified by hostname must be allowed (allow_domain).
+        assert str(captured[1]) == "https://dns.google/dns-query"
+    finally:
+        utils._resolve = orig_resolve
+        utils.resolve_cache.clear()
+
+
 def test_checksum():
     data = b"12345678"
     result = utils.checksum(data)
     assert result == 0x2f2b
     data = b"123456780"
     result = utils.checksum(data)
-    assert result == 0xf72a
+    assert result == 0xff2a

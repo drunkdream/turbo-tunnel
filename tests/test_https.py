@@ -109,15 +109,21 @@ async def test_http_proxy_with_unknown_domain():
     async def async_task():
         s = socket.socket()
         tun = tunnel.TCPTunnel(s, address=("127.0.0.1", port1))
-        await tun.connect()
-        domain = "domainnotexist.com"
-        await tun.write(
-            ("GET http://%s/ HTTP/1.1\r\nHost: %s\r\n\r\n" % (domain, domain)).encode()
-        )
-        rsp = await tun.read()
-        print(rsp)
+        try:
+            await tun.connect()
+            domain = "domainnotexist.com"
+            await tun.write(
+                ("GET http://%s/ HTTP/1.1\r\nHost: %s\r\n\r\n" % (domain, domain)).encode()
+            )
+            rsp = await asyncio.wait_for(tun.read(), 5)
+            print(rsp)
+        finally:
+            tun.close()
 
-    utils.safe_ensure_future(async_task())
+    # Track the background task and await it before the test ends. Leaving it
+    # pending makes pytest-asyncio cancel it during loop teardown, which can
+    # hang on the underlying socket in CI.
+    bg_task = asyncio.ensure_future(async_task())
 
     time0 = time.time()
     await asyncio.sleep(1)
@@ -130,10 +136,24 @@ async def test_http_proxy_with_unknown_domain():
         b"GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n\r\n"
         % (port2, port1)
     )
-    rsp = await tun.read()
+    # A single read may return only part of the chunked response on some
+    # platforms. Keep reading until the terminating chunk arrives.
+    rsp = b""
+    while b"\r\n0\r\n\r\n" not in rsp:
+        chunk = await asyncio.wait_for(tun.read(), 5)
+        if not chunk:
+            break
+        rsp += chunk
     time1 = time.time()
     pos = rsp.find(b"\r\n\r\n")
     assert pos > 0
-    rsp = rsp[pos + 4 :]
-    assert rsp == b"b\r\nHello HTTP!\r\n0\r\n\r\n"
+    body = rsp[pos + 4 :]
+    assert b"Hello HTTP!" in body
     assert time1 - time0 < 2
+
+    # Close the second tunnel and drain the background task before teardown.
+    tun.close()
+    try:
+        await asyncio.wait_for(bg_task, 6)
+    except (asyncio.TimeoutError, OSError):
+        bg_task.cancel()

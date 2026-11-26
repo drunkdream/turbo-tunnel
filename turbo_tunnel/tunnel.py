@@ -394,7 +394,13 @@ class TunnelIOStream(tornado.iostream.BaseIOStream):
             return array_size
 
     def write_to_fd(self, data):
-        utils.AsyncTaskManager().start_task(self._tunnel.write(data))
+        # ``data`` is a memoryview owned by asyncio's transport and is released
+        # as soon as this synchronous callback returns. The write runs in a
+        # background task, so it must own an immutable copy; otherwise newer
+        # asyncio/tornado versions raise "operation forbidden on released
+        # memoryview object" when the task resumes.
+        buffer = bytes(data)
+        utils.AsyncTaskManager().start_task(self._tunnel.write(buffer))
         return len(data)
 
 
